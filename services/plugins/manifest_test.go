@@ -434,17 +434,17 @@ func TestParseManifest_Styles_RequiresUIModify(t *testing.T) {
 	}
 }
 
-func TestParseManifest_Styles_RequiresHttpServe(t *testing.T) {
+func TestParseManifest_Styles_DoesNotRequireHttpServe(t *testing.T) {
+	// CSS bytes are read from assets/ and inlined into customStyles
+	// on /api/config, not served at a URL, so http.serve isn't
+	// needed for manifest.styles.
 	_, err := ParseManifest([]byte(`{
 		"api": "1", "name": "styled", "version": "1.0",
 		"permissions": ["ui.modify"],
 		"styles": ["theme.css"]
 	}`))
-	if err == nil {
-		t.Fatal("expected error when styles is set without http.serve")
-	}
-	if !strings.Contains(err.Error(), "http.serve") {
-		t.Errorf("error should mention http.serve, got: %v", err)
+	if err != nil {
+		t.Errorf("styles should not require http.serve: %v", err)
 	}
 }
 
@@ -524,17 +524,17 @@ func TestParseManifest_Scripts_RequiresUIModify(t *testing.T) {
 	}
 }
 
-func TestParseManifest_Scripts_RequiresHttpServe(t *testing.T) {
+func TestParseManifest_Scripts_DoesNotRequireHttpServe(t *testing.T) {
+	// Script bytes are read from assets/ and inlined into
+	// /customjavascript, not served at a URL, so http.serve isn't
+	// needed for manifest.scripts.
 	_, err := ParseManifest([]byte(`{
 		"api": "1", "name": "scripted", "version": "1.0",
 		"permissions": ["ui.modify"],
 		"scripts": ["client.js"]
 	}`))
-	if err == nil {
-		t.Fatal("expected error when scripts is set without http.serve")
-	}
-	if !strings.Contains(err.Error(), "http.serve") {
-		t.Errorf("error should mention http.serve, got: %v", err)
+	if err != nil {
+		t.Errorf("scripts should not require http.serve: %v", err)
 	}
 }
 

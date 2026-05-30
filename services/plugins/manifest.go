@@ -382,15 +382,16 @@ func (m *Manifest) validateActions() error {
 }
 
 // validateStyles checks manifest.styles entries and rewrites them
-// into absolute plugin-namespace URLs. Rules mirror manifest.actions
-// (relative paths auto-prefix to /plugins/<slug>/, cross-plugin paths
-// rejected, http.serve required since the host serves the bytes), but
-// stricter on the external-URL front: http(s):// targets are rejected
-// outright. Admins reviewing the manifest see every URL that will be
-// injected into their viewer's global CSS scope, so the list should
-// be exhaustive and self-contained. Plugins that need external assets
-// (fonts, etc.) can @import or @font-face them from inside the
-// bundled CSS, which is what the admin reviewed.
+// into absolute plugin-namespace URLs. Each entry's bytes are read
+// from assets/ and concatenated into the customStyles response on
+// /api/config, so only ui.modify is required (the plugin paints
+// inside Owncast's chrome). Path rules mirror manifest.actions
+// (relative paths auto-prefix to /plugins/<slug>/, cross-plugin
+// paths rejected); http(s):// targets are rejected outright so an
+// admin reviewing the manifest sees every file that will land in
+// their viewer's global CSS scope. Plugins that need external
+// assets (fonts, etc.) can @import or @font-face them from inside
+// the bundled CSS the admin reviewed.
 func (m *Manifest) validateStyles() error {
 	if len(m.Styles) == 0 {
 		return nil
@@ -402,12 +403,6 @@ func (m *Manifest) validateStyles() error {
 				"into the viewer's global scope must opt in to ui.modify " +
 				"so it's visible to anyone reviewing the manifest that the " +
 				"plugin restyles Owncast's UI")
-	}
-	if !m.hasPermission(PermHttpServe) {
-		return errors.New(
-			"manifest.styles requires the \"http.serve\" permission so the " +
-				"host can serve the bundled CSS files at /plugins/<slug>/ " +
-				"URLs")
 	}
 	for i, raw := range m.Styles {
 		rewritten, err := rewritePluginAssetPath(m.Slug, raw, ".css")
@@ -421,10 +416,9 @@ func (m *Manifest) validateStyles() error {
 
 // validateScripts checks manifest.scripts entries and rewrites them
 // into absolute plugin-namespace URLs. Same rules as validateStyles
-// applied to .js files: each becomes a <script src=...> on the viewer
-// page, which runs in the chrome's window context. Permission gating
-// matches styles (ui.modify + http.serve) since scripts can manipulate
-// anything the viewer renders.
+// applied to .js files: each entry's bytes are read from assets/ and
+// concatenated into the /customjavascript response, so only ui.modify
+// is required (the plugin paints inside Owncast's chrome).
 func (m *Manifest) validateScripts() error {
 	if len(m.Scripts) == 0 {
 		return nil
@@ -436,12 +430,6 @@ func (m *Manifest) validateScripts() error {
 				"JavaScript into the viewer page must opt in to ui.modify " +
 				"so it's visible to anyone reviewing the manifest that the " +
 				"plugin runs code inside Owncast's chrome")
-	}
-	if !m.hasPermission(PermHttpServe) {
-		return errors.New(
-			"manifest.scripts requires the \"http.serve\" permission so " +
-				"the host can serve the bundled JavaScript files at " +
-				"/plugins/<slug>/ URLs")
 	}
 	for i, raw := range m.Scripts {
 		rewritten, err := rewritePluginAssetPath(m.Slug, raw, ".js")
