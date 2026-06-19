@@ -14,13 +14,17 @@ import {
 } from '../../../../utils/config-constants';
 import { SocialHandle, UpdateArgs } from '../../../../types/config-section';
 import {
-  isValidMatrixAccount,
   isValidAccount,
   isValidUrl,
   DEFAULT_TEXTFIELD_URL_PATTERN,
 } from '../../../../utils/validators';
 import { TextField } from '../../TextField';
-import { createInputStatus, STATUS_ERROR, STATUS_SUCCESS } from '../../../../utils/input-statuses';
+import {
+  createInputStatus,
+  STATUS_ERROR,
+  STATUS_PROCESSING,
+  STATUS_SUCCESS,
+} from '../../../../utils/input-statuses';
 import { FormStatusIndicator } from '../../FormStatusIndicator';
 
 const { Title } = Typography;
@@ -141,6 +145,11 @@ export default function EditSocialLinks() {
 
   // posts all the variants at once as an array obj
   const postUpdateToAPI = async (postValue: any) => {
+    if (!displayModal) {
+      // only create the processing status if the modal is inactive
+      resetTimer = null;
+      setSubmitStatus(createInputStatus(STATUS_PROCESSING));
+    }
     await postConfigUpdateToAPI({
       apiPath: API_SOCIAL_HANDLES,
       data: { value: postValue },
@@ -291,11 +300,11 @@ export default function EditSocialLinks() {
   ];
 
   const isValid = (url: string, platform: string) => {
+    if (platform === '') {
+      return false;
+    }
     if (platform === 'xmpp') {
       return isValidAccount(url, 'xmpp');
-    }
-    if (platform === 'matrix') {
-      return isValidMatrixAccount(url);
     }
 
     return isValidUrl(url);

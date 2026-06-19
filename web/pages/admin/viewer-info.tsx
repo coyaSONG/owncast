@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext, ReactElement } from 'react';
 import { Row, Col, Typography, MenuProps, Dropdown, Spin, Alert } from 'antd';
 import { getUnixTime, sub } from 'date-fns';
 import dynamic from 'next/dynamic';
+import { useTranslation } from 'next-export-i18n';
 import { Chart } from '../../components/admin/Chart';
 import { StatisticItem } from '../../components/admin/StatisticItem';
 import { ViewerTable } from '../../components/admin/ViewerTable';
@@ -11,6 +12,7 @@ import { ServerStatusContext } from '../../utils/server-status-context';
 import { VIEWERS_OVER_TIME, ACTIVE_VIEWER_DETAILS, fetchData } from '../../utils/apis';
 
 import { AdminLayout } from '../../components/layouts/AdminLayout';
+import { Localization } from '../../types/localization';
 
 // Lazy loaded components
 
@@ -26,6 +28,7 @@ const FETCH_INTERVAL = 60 * 1000; // 1 min
 
 export default function ViewersOverTime() {
   const context = useContext(ServerStatusContext);
+  const { t } = useTranslation();
   const { online, broadcaster, viewerCount, overallPeakViewerCount, sessionPeakViewerCount } =
     context || {};
   let streamStart;
@@ -34,19 +37,20 @@ export default function ViewersOverTime() {
   }
 
   const times = [
-    { title: 'Current stream', start: streamStart },
-    { title: 'Last 12 hours', start: sub(new Date(), { hours: 12 }) },
-    { title: 'Last 24 hours', start: sub(new Date(), { hours: 24 }) },
-    { title: 'Last 7 days', start: sub(new Date(), { days: 7 }) },
-    { title: 'Last 30 days', start: sub(new Date(), { days: 30 }) },
-    { title: 'Last 3 months', start: sub(new Date(), { months: 3 }) },
-    { title: 'Last 6 months', start: sub(new Date(), { months: 6 }) },
+    { title: t(Localization.Admin.ViewerInfo.currentStream), start: streamStart },
+    { title: t(Localization.Admin.ViewerInfo.last12Hours), start: sub(new Date(), { hours: 12 }) },
+    { title: t(Localization.Admin.ViewerInfo.last24Hours), start: sub(new Date(), { hours: 24 }) },
+    { title: t(Localization.Admin.ViewerInfo.last7Days), start: sub(new Date(), { days: 7 }) },
+    { title: t(Localization.Admin.ViewerInfo.last30Days), start: sub(new Date(), { days: 30 }) },
+    { title: t(Localization.Admin.ViewerInfo.last3Months), start: sub(new Date(), { months: 3 }) },
+    { title: t(Localization.Admin.ViewerInfo.last6Months), start: sub(new Date(), { months: 6 }) },
   ];
 
   const [loadingChart, setLoadingChart] = useState(true);
   const [viewerInfo, setViewerInfo] = useState([]);
   const [viewerDetails, setViewerDetails] = useState([]);
   const [timeWindowStart, setTimeWindowStart] = useState(times[1]);
+  const [timeWindowKey, setTimeWindowKey] = useState(1);
 
   const getInfo = async () => {
     try {
@@ -83,6 +87,7 @@ export default function ViewersOverTime() {
 
   const onTimeWindowSelect = ({ key }) => {
     setTimeWindowStart(times[key]);
+    setTimeWindowKey(Number(key));
   };
 
   const offset: number = online && streamStart ? 0 : 1;
@@ -94,13 +99,13 @@ export default function ViewersOverTime() {
 
   return (
     <>
-      <Typography.Title>Viewer Info</Typography.Title>
+      <Typography.Title>{t(Localization.Admin.ViewerInfo.title)}</Typography.Title>
       <br />
       <Row gutter={[16, 16]} justify="space-around">
         {online && (
           <Col span={8} md={8}>
             <StatisticItem
-              title="Current viewers"
+              title={t(Localization.Admin.ViewerInfo.currentViewers)}
               value={viewerCount.toString()}
               prefix={<UserOutlined />}
             />
@@ -108,14 +113,18 @@ export default function ViewersOverTime() {
         )}
         <Col md={online ? 8 : 12}>
           <StatisticItem
-            title={online ? 'Max viewers this stream' : 'Max viewers last stream'}
+            title={
+              online
+                ? t(Localization.Admin.ViewerInfo.maxViewersThisStream)
+                : t(Localization.Admin.ViewerInfo.maxViewersLastStream)
+            }
             value={sessionPeakViewerCount.toString()}
             prefix={<UserOutlined />}
           />
         </Col>
         <Col md={online ? 8 : 12}>
           <StatisticItem
-            title="All-time max viewers"
+            title={t(Localization.Admin.ViewerInfo.maxViewers)}
             value={overallPeakViewerCount.toString()}
             prefix={<UserOutlined />}
           />
@@ -125,8 +134,8 @@ export default function ViewersOverTime() {
         <Alert
           style={{ marginTop: '10px' }}
           banner
-          message="Please wait"
-          description="No viewer data has been collected yet."
+          message={t(Localization.Admin.ViewerInfo.pleaseWait)}
+          description={t(Localization.Admin.ViewerInfo.noData)}
           type="info"
         />
       )}
@@ -134,12 +143,13 @@ export default function ViewersOverTime() {
       <Spin spinning={!viewerInfo.length || loadingChart}>
         {viewerInfo.length > 0 && (
           <Chart
-            title="Viewers"
+            title={t(Localization.Admin.ViewerInfo.viewers)}
             data={viewerInfo}
             color="#2087E2"
             unit="viewers"
             minYValue={0}
             yStepSize={1}
+            timeWindowKey={timeWindowKey}
           />
         )}
 

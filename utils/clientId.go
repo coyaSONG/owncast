@@ -23,19 +23,20 @@ func GenerateClientIDFromRequest(req *http.Request) string {
 // GetIPAddressFromRequest returns the IP address from a http request.
 func GetIPAddressFromRequest(req *http.Request) string {
 	ipAddressString := req.RemoteAddr
+
 	xForwardedFor := req.Header.Get("X-FORWARDED-FOR")
 	if xForwardedFor != "" {
-		clientIpString := strings.Split(xForwardedFor, ", ")[0]
-		if strings.Contains(clientIpString, ":") {
-			ip, _, err := net.SplitHostPort(clientIpString)
-			if err != nil {
-				log.Errorln(err)
-				return ""
-			}
-			return ip
-		}
-		return clientIpString
+		ipAddressString = strings.Split(xForwardedFor, ", ")[0]
 	}
+
+	if !strings.Contains(ipAddressString, ":") {
+		return ipAddressString
+	}
+
+	if isIPv6(ipAddressString) && !strings.Contains(ipAddressString, "[") {
+		return ipAddressString
+	}
+
 	ip, _, err := net.SplitHostPort(ipAddressString)
 	if err != nil {
 		log.Errorln(err)
@@ -43,4 +44,8 @@ func GetIPAddressFromRequest(req *http.Request) string {
 	}
 
 	return ip
+}
+
+func isIPv6(address string) bool {
+	return strings.Count(address, ":") >= 2
 }

@@ -1,8 +1,10 @@
-import React, { FC } from 'react';
+import React, { FC, useState } from 'react';
 import { Table, Tag, Typography } from 'antd';
 import Linkify from 'react-linkify';
-import { SortOrder } from 'antd/lib/table/interface';
-import format from 'date-fns/format';
+import { SortOrder, TablePaginationConfig } from 'antd/lib/table/interface';
+import { format } from 'date-fns';
+import { useTranslation } from 'next-export-i18n';
+import { Localization } from '../../types/localization';
 
 const { Title } = Typography;
 
@@ -18,70 +20,78 @@ function renderColumnLevel(text, entry) {
   return <Tag color={color}>{text}</Tag>;
 }
 
-function renderMessage(text) {
-  return <Linkify>{text}</Linkify>;
-}
-
 export type LogTableProps = {
   logs: object[];
-  pageSize: number;
+  initialPageSize: number;
 };
 
-export const LogTable: FC<LogTableProps> = ({ logs, pageSize }) => {
+export const LogTable: FC<LogTableProps> = ({ logs, initialPageSize }) => {
+  const { t } = useTranslation();
+  const [pageSize, setPageSize] = useState(initialPageSize);
+
+  const handleTableChange = (pagination: TablePaginationConfig) => {
+    setPageSize(pagination.pageSize);
+  };
+
   if (!logs?.length) {
     return null;
   }
+
   const columns = [
     {
-      title: 'Level',
+      title: t(Localization.Admin.LogTable.level),
       dataIndex: 'level',
       key: 'level',
       filters: [
         {
-          text: 'Info',
+          text: t(Localization.Admin.LogTable.info),
           value: 'info',
         },
         {
-          text: 'Warning',
+          text: t(Localization.Admin.LogTable.warning),
           value: 'warning',
         },
         {
-          text: 'Error',
-          value: 'Error',
+          text: t(Localization.Admin.LogTable.error),
+          value: 'error',
         },
       ],
-      onFilter: (level, row) => row.level.indexOf(level) === 0,
+      onFilter: (level, row) => row.level === level,
       render: renderColumnLevel,
     },
     {
-      title: 'Timestamp',
+      title: t(Localization.Admin.LogTable.timestamp),
       dataIndex: 'time',
       key: 'time',
-      render: timestamp => {
+      render: (timestamp: Date) => {
         const dateObject = new Date(timestamp);
-        return format(dateObject, 'pp P');
+        return format(dateObject, 'p P');
       },
-      sorter: (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
+      sorter: (a: any, b: any) => new Date(a.time).getTime() - new Date(b.time).getTime(),
       sortDirections: ['descend', 'ascend'] as SortOrder[],
       defaultSortOrder: 'descend' as SortOrder,
     },
+
     {
-      title: 'Message',
+      title: t(Localization.Admin.LogTable.message),
       dataIndex: 'message',
       key: 'message',
-      render: renderMessage,
+      render: (message: string) => <Linkify>{message}</Linkify>,
     },
   ];
 
   return (
     <div className="logs-section">
-      <Title>Logs</Title>
+      <Title>{t(Localization.Admin.LogTable.logs)}</Title>
       <Table
         size="middle"
         dataSource={logs}
         columns={columns}
         rowKey={row => row.time}
-        pagination={{ pageSize: pageSize || 20 }}
+        pagination={{
+          pageSize,
+        }}
+        onChange={handleTableChange}
       />
     </div>
   );

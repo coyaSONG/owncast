@@ -1,4 +1,4 @@
-import { Typography } from 'antd';
+import { Col, Row, Typography } from 'antd';
 import React, { ReactElement, useContext, useEffect, useState } from 'react';
 import { TEXTFIELD_TYPE_TEXTAREA } from '../../components/admin/TextField';
 import { TextFieldWithSubmit } from '../../components/admin/TextFieldWithSubmit';
@@ -16,13 +16,16 @@ import {
   API_CHAT_FORBIDDEN_USERNAMES,
   API_CHAT_SUGGESTED_USERNAMES,
   FIELD_PROPS_CHAT_JOIN_MESSAGES_ENABLED,
+  FIELD_PROPS_ENABLE_CHAT_SLUR_FILTER,
   CHAT_ESTABLISHED_USER_MODE,
   FIELD_PROPS_DISABLE_CHAT,
+  FIELD_PROPS_CHAT_REQUIRE_AUTHENTICATION,
   postConfigUpdateToAPI,
   RESET_TIMEOUT,
   TEXTFIELD_PROPS_CHAT_FORBIDDEN_USERNAMES,
   TEXTFIELD_PROPS_CHAT_SUGGESTED_USERNAMES,
   TEXTFIELD_PROPS_SERVER_WELCOME_MESSAGE,
+  FIELD_PROPS_ENABLE_SPAM_PROTECTION,
 } from '../../utils/config-constants';
 import { ServerStatusContext } from '../../utils/server-status-context';
 
@@ -43,6 +46,9 @@ export default function ConfigChat() {
     instanceDetails,
     suggestedUsernames,
     chatEstablishedUserMode,
+    chatSpamProtectionEnabled,
+    chatSlurFilterEnabled,
+    chatRequireAuthentication,
   } = serverConfig;
   const { welcomeMessage } = instanceDetails;
 
@@ -63,6 +69,18 @@ export default function ConfigChat() {
 
   function handleEstablishedUserModeChange(enabled: boolean) {
     handleFieldChange({ fieldName: 'chatEstablishedUserMode', value: enabled });
+  }
+
+  function handleChatSpamProtectionChange(enabled: boolean) {
+    handleFieldChange({ fieldName: 'chatSpamProtectionEnabled', value: enabled });
+  }
+
+  function handleChatSlurFilterChange(enabled: boolean) {
+    handleFieldChange({ fieldName: 'chatSlurFilterEnabled', value: enabled });
+  }
+
+  function handleChatRequireAuthenticationChange(enabled: boolean) {
+    handleFieldChange({ fieldName: 'chatRequireAuthentication', value: enabled });
   }
 
   function resetForbiddenUsernameState() {
@@ -155,6 +173,9 @@ export default function ConfigChat() {
       suggestedUsernames,
       welcomeMessage,
       chatEstablishedUserMode,
+      chatSpamProtectionEnabled,
+      chatSlurFilterEnabled,
+      chatRequireAuthentication,
     });
   }, [serverConfig]);
 
@@ -165,60 +186,86 @@ export default function ConfigChat() {
   return (
     <div className="config-server-details-form">
       <Title>Chat Settings</Title>
-      <div className="form-module config-server-details-container">
-        <ToggleSwitch
-          fieldName="chatDisabled"
-          {...FIELD_PROPS_DISABLE_CHAT}
-          checked={!formDataValues.chatDisabled}
-          reversed
-          onChange={handleChatDisableChange}
-        />
-        <ToggleSwitch
-          fieldName="chatJoinMessagesEnabled"
-          {...FIELD_PROPS_CHAT_JOIN_MESSAGES_ENABLED}
-          checked={formDataValues.chatJoinMessagesEnabled}
-          onChange={handleChatJoinMessagesEnabledChange}
-        />
-        <ToggleSwitch
-          fieldName="chatEstablishedUserMode"
-          {...CHAT_ESTABLISHED_USER_MODE}
-          checked={formDataValues.chatEstablishedUserMode}
-          onChange={handleEstablishedUserModeChange}
-        />
-        <TextFieldWithSubmit
-          fieldName="welcomeMessage"
-          {...TEXTFIELD_PROPS_SERVER_WELCOME_MESSAGE}
-          type={TEXTFIELD_TYPE_TEXTAREA}
-          value={formDataValues.welcomeMessage}
-          initialValue={welcomeMessage}
-          onChange={handleFieldChange}
-        />
-        <br />
-        <br />
-        <EditValueArray
-          title={TEXTFIELD_PROPS_CHAT_FORBIDDEN_USERNAMES.label}
-          placeholder={TEXTFIELD_PROPS_CHAT_FORBIDDEN_USERNAMES.placeholder}
-          description={TEXTFIELD_PROPS_CHAT_FORBIDDEN_USERNAMES.tip}
-          values={formDataValues.forbiddenUsernames}
-          handleDeleteIndex={handleDeleteForbiddenUsernameIndex}
-          handleCreateString={handleCreateForbiddenUsername}
-          submitStatus={forbiddenUsernameSaveState}
-        />
-        <br />
-        <br />
-        <EditValueArray
-          title={TEXTFIELD_PROPS_CHAT_SUGGESTED_USERNAMES.label}
-          placeholder={TEXTFIELD_PROPS_CHAT_SUGGESTED_USERNAMES.placeholder}
-          description={TEXTFIELD_PROPS_CHAT_SUGGESTED_USERNAMES.tip}
-          values={formDataValues.suggestedUsernames}
-          handleDeleteIndex={handleDeleteSuggestedUsernameIndex}
-          handleCreateString={handleCreateSuggestedUsername}
-          submitStatus={suggestedUsernameSaveState}
-          continuousStatusMessage={getSuggestedUsernamesLimitWarning(
-            formDataValues.suggestedUsernames.length,
-          )}
-        />
-      </div>
+      <Row gutter={[45, 16]}>
+        <Col md={24} lg={12}>
+          <div className="form-module">
+            <ToggleSwitch
+              fieldName="chatDisabled"
+              {...FIELD_PROPS_DISABLE_CHAT}
+              checked={!formDataValues.chatDisabled}
+              reversed
+              onChange={handleChatDisableChange}
+            />
+            <ToggleSwitch
+              fieldName="chatJoinMessagesEnabled"
+              {...FIELD_PROPS_CHAT_JOIN_MESSAGES_ENABLED}
+              checked={formDataValues.chatJoinMessagesEnabled}
+              onChange={handleChatJoinMessagesEnabledChange}
+            />
+            <TextFieldWithSubmit
+              fieldName="welcomeMessage"
+              {...TEXTFIELD_PROPS_SERVER_WELCOME_MESSAGE}
+              type={TEXTFIELD_TYPE_TEXTAREA}
+              value={formDataValues.welcomeMessage}
+              initialValue={welcomeMessage}
+              onChange={handleFieldChange}
+            />
+            <br />
+            <br />
+            <EditValueArray
+              title={TEXTFIELD_PROPS_CHAT_FORBIDDEN_USERNAMES.label}
+              placeholder={TEXTFIELD_PROPS_CHAT_FORBIDDEN_USERNAMES.placeholder}
+              description={TEXTFIELD_PROPS_CHAT_FORBIDDEN_USERNAMES.tip}
+              values={formDataValues.forbiddenUsernames}
+              handleDeleteIndex={handleDeleteForbiddenUsernameIndex}
+              handleCreateString={handleCreateForbiddenUsername}
+              submitStatus={forbiddenUsernameSaveState}
+            />
+            <br />
+            <br />
+            <EditValueArray
+              title={TEXTFIELD_PROPS_CHAT_SUGGESTED_USERNAMES.label}
+              placeholder={TEXTFIELD_PROPS_CHAT_SUGGESTED_USERNAMES.placeholder}
+              description={TEXTFIELD_PROPS_CHAT_SUGGESTED_USERNAMES.tip}
+              values={formDataValues.suggestedUsernames}
+              handleDeleteIndex={handleDeleteSuggestedUsernameIndex}
+              handleCreateString={handleCreateSuggestedUsername}
+              submitStatus={suggestedUsernameSaveState}
+              continuousStatusMessage={getSuggestedUsernamesLimitWarning(
+                formDataValues.suggestedUsernames.length,
+              )}
+            />
+          </div>
+        </Col>
+        <Col md={24} lg={12}>
+          <div className="form-module">
+            <ToggleSwitch
+              fieldName="chatSpamProtectionEnabled"
+              {...FIELD_PROPS_ENABLE_SPAM_PROTECTION}
+              checked={formDataValues.chatSpamProtectionEnabled}
+              onChange={handleChatSpamProtectionChange}
+            />
+            <ToggleSwitch
+              fieldName="chatEstablishedUserMode"
+              {...CHAT_ESTABLISHED_USER_MODE}
+              checked={formDataValues.chatEstablishedUserMode}
+              onChange={handleEstablishedUserModeChange}
+            />
+            <ToggleSwitch
+              fieldName="chatSlurFilterEnabled"
+              {...FIELD_PROPS_ENABLE_CHAT_SLUR_FILTER}
+              checked={formDataValues.chatSlurFilterEnabled}
+              onChange={handleChatSlurFilterChange}
+            />
+            <ToggleSwitch
+              fieldName="chatRequireAuthentication"
+              {...FIELD_PROPS_CHAT_REQUIRE_AUTHENTICATION}
+              checked={formDataValues.chatRequireAuthentication}
+              onChange={handleChatRequireAuthenticationChange}
+            />
+          </div>
+        </Col>
+      </Row>
     </div>
   );
 }

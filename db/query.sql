@@ -3,166 +3,248 @@
 -- Federation related queries.
 
 -- name: GetFollowerCount :one
-SElECT count(*) FROM ap_followers WHERE approved_at is not null;
+-- Featured-streams follows (another Owncast server following us so it can show
+-- our live status in its directory) are excluded: they are a directory
+-- relationship, not a fan follow, so they must not inflate the follower count.
+SELECT count(*) FROM ap_followers WHERE approved_at is not null AND directory IS NOT 1;
 
 -- name: GetLocalPostCount :one
-SElECT count(*) FROM ap_outbox;
+SELECT count(*) FROM ap_outbox;
 
 -- name: GetFederationFollowersWithOffset :many
-SELECT iri, inbox, name, username, image, created_at FROM ap_followers WHERE approved_at is not null ORDER BY created_at DESC LIMIT $1 OFFSET $2;
+-- Excludes featured-streams (Owncast-server) follows so they don't show up in
+-- the public or admin followers list; they are tracked as a directory
+-- relationship, not surfaced as followers.
+SELECT iri, inbox, shared_inbox, name, username, image, created_at FROM ap_followers WHERE approved_at is not null AND directory IS NOT 1 ORDER BY created_at DESC LIMIT ? OFFSET ?;
 
 -- name: GetRejectedAndBlockedFollowers :many
 SELECT iri, name, username, image, created_at, disabled_at FROM ap_followers WHERE disabled_at is not null;
 
 -- name: GetFederationFollowerApprovalRequests :many
-SELECT iri, inbox, name, username, image, created_at FROM ap_followers WHERE approved_at IS null AND disabled_at is null;
+-- Regular (fan) follow approval requests only. Featured-streams (Owncast
+-- server) requests are excluded here and surfaced separately via
+-- GetPendingFeaturedFollowRequests so they can be approved from the featured
+-- streams admin instead of the followers admin.
+SELECT iri, inbox, shared_inbox, name, username, image, created_at FROM ap_followers WHERE approved_at IS null AND disabled_at is null AND directory IS NOT 1;
+
+-- name: GetPendingFeaturedFollowRequests :many
+-- Pending requests from other Owncast servers asking to feature this server's
+-- stream in their directory. These always require explicit approval.
+SELECT iri, inbox, shared_inbox, name, username, image, created_at FROM ap_followers WHERE approved_at IS null AND disabled_at is null AND directory IS 1 ORDER BY created_at DESC;
 
 -- name: ApproveFederationFollower :exec
-UPDATE ap_followers SET approved_at = $1, disabled_at = null WHERE iri = $2;
+UPDATE ap_followers SET approved_at = ?, disabled_at = null WHERE iri = ?;
 
 -- name: RejectFederationFollower :exec
-UPDATE ap_followers SET approved_at = null, disabled_at = $1 WHERE iri = $2;
+UPDATE ap_followers SET approved_at = null, disabled_at = ? WHERE iri = ?;
 
 -- name: GetFollowerByIRI :one
-SELECT iri, inbox, name, username, image, request, request_object, created_at, approved_at, disabled_at FROM ap_followers WHERE iri = $1;
+SELECT iri, inbox, shared_inbox, name, username, image, request, request_object, created_at, approved_at, disabled_at, directory FROM ap_followers WHERE iri = ?;
 
 -- name: GetOutboxWithOffset :many
-SELECT value FROM ap_outbox LIMIT $1 OFFSET $2;
+SELECT value FROM ap_outbox LIMIT ? OFFSET ?;
 
 
 -- name: GetObjectFromOutboxByIRI :one
-SELECT value, live_notification, created_at FROM ap_outbox WHERE iri = $1;
+SELECT value, live_notification, created_at FROM ap_outbox WHERE iri = ?;
 
 -- name: RemoveFollowerByIRI :exec
-DELETE FROM ap_followers WHERE iri = $1;
+DELETE FROM ap_followers WHERE iri = ?;
 
 -- name: AddFollower :exec
-INSERT INTO ap_followers(iri, inbox, request, request_object, name, username, image, approved_at) values($1, $2, $3, $4, $5, $6, $7, $8);
+INSERT INTO ap_followers(iri, inbox, shared_inbox, request, request_object, name, username, image, approved_at, directory) values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: AddToOutbox :exec
-INSERT INTO ap_outbox(iri, value, type, live_notification) values($1, $2, $3, $4);
+INSERT INTO ap_outbox(iri, value, type, live_notification) values(?, ?, ?, ?);
 
 -- name: AddToAcceptedActivities :exec
-INSERT INTO ap_accepted_activities(iri, actor, type, timestamp) values($1, $2, $3, $4);
+INSERT INTO ap_accepted_activities(iri, actor, type, timestamp) values(?, ?, ?, ?);
 
 -- name: GetInboundActivityCount :one
 SELECT count(*) FROM ap_accepted_activities;
 
 -- name: GetInboundActivitiesWithOffset :many
-SELECT iri, actor, type, timestamp FROM ap_accepted_activities ORDER BY timestamp DESC LIMIT $1 OFFSET $2;
+SELECT iri, actor, type, timestamp FROM ap_accepted_activities ORDER BY timestamp DESC LIMIT ? OFFSET ?;
 
 -- name: DoesInboundActivityExist :one
-SELECT count(*) FROM ap_accepted_activities WHERE iri = $1 AND actor = $2 AND TYPE = $3;
+SELECT count(*) FROM ap_accepted_activities WHERE iri = ? AND actor = ? AND TYPE = ?;
 
 -- name: UpdateFollowerByIRI :exec
-UPDATE ap_followers SET inbox = $1, name = $2, username = $3, image = $4 WHERE iri = $5;
+UPDATE ap_followers SET inbox = ?, shared_inbox = ?, name = ?, username = ?, image = ? WHERE iri = ?;
+
+-- name: GetFollowersToValidate :many
+SELECT iri, inbox, shared_inbox, name, username, image, first_validation_failure_at
+FROM ap_followers
+WHERE approved_at IS NOT NULL AND disabled_at IS NULL
+ORDER BY last_validated_at ASC NULLS FIRST
+LIMIT ?;
+
+-- name: UpdateFollowerValidationSuccess :exec
+UPDATE ap_followers
+SET last_validated_at = ?, first_validation_failure_at = NULL
+WHERE iri = ?;
+
+-- name: UpdateFollowerValidationFailure :exec
+UPDATE ap_followers
+SET last_validated_at = @last_validated_at, first_validation_failure_at = COALESCE(first_validation_failure_at, @last_validated_at)
+WHERE iri = @iri;
+
+-- name: GetUniqueDeliveryInboxes :many
+SELECT COALESCE(shared_inbox, inbox) as delivery_inbox FROM ap_followers WHERE approved_at is not null GROUP BY delivery_inbox;
+
+-- name: GetUniqueDirectoryDeliveryInboxes :many
+-- Approved directory followers only. The Offer/Leave stream pings are delivered
+-- here, not to fan followers, who only need the go-live Create/Note.
+SELECT COALESCE(shared_inbox, inbox) as delivery_inbox FROM ap_followers WHERE approved_at is not null AND directory IS 1 GROUP BY delivery_inbox;
+
+-- name: GetApprovedDirectoryFollowers :many
+-- Approved directories that are featuring/listing this server. Shown in the
+-- admin so the operator can review and remove them.
+SELECT iri, inbox, shared_inbox, name, username, image, created_at FROM ap_followers WHERE approved_at IS NOT NULL AND disabled_at IS NULL AND directory IS 1 ORDER BY created_at DESC;
 
 -- name: BanIPAddress :exec
-INSERT INTO ip_bans(ip_address, notes) values($1, $2);
+INSERT INTO ip_bans(ip_address, notes) values(?, ?);
 
 -- name: RemoveIPAddressBan :exec
-DELETE FROM ip_bans WHERE ip_address = $1;
+DELETE FROM ip_bans WHERE ip_address = ?;
 
 -- name: IsIPAddressBlocked :one
-SELECT count(*) FROM ip_bans WHERE ip_address = $1;
+SELECT count(*) FROM ip_bans WHERE ip_address = ?;
 
 -- name: GetIPAddressBans :many
 SELECT * FROM ip_bans;
+
 -- name: AddNotification :exec
-INSERT INTO notifications (channel, destination) VALUES($1, $2);
+INSERT INTO notifications (channel, destination) VALUES(?, ?);
 
 -- name: GetNotificationDestinationsForChannel :many
-SELECT destination FROM notifications WHERE channel = $1;
+SELECT destination FROM notifications WHERE channel = ?;
 
 -- name: RemoveNotificationDestinationForChannel :exec
-DELETE FROM notifications WHERE channel = $1 AND destination = $2;
+DELETE FROM notifications WHERE channel = ? AND destination = ?;
+
 -- name: AddAuthForUser :exec
-INSERT INTO auth(user_id, token, type) values($1, $2, $3);
+INSERT INTO auth(user_id, token, type) values(?, ?, ?);
 
 -- name: GetUserByAuth :one
-SELECT users.id, display_name, display_color, users.created_at, disabled_at, previous_names, namechanged_at, authenticated_at, scopes FROM auth, users WHERE token = $1 AND auth.type = $2 AND users.id = auth.user_id;
+SELECT users.id, display_name, display_color, users.created_at, disabled_at, previous_names, namechanged_at, authenticated_at, scopes FROM auth, users WHERE token = ? AND auth.type = ? AND users.id = auth.user_id;
 
 -- name: AddAccessTokenForUser :exec
-INSERT INTO user_access_tokens(token, user_id) values($1, $2);
+INSERT INTO user_access_tokens(token, user_id) values(?, ?);
 
 -- name: GetUserByAccessToken :one
-SELECT users.id, display_name, display_color, users.created_at, disabled_at, previous_names, namechanged_at, authenticated_at, scopes FROM users, user_access_tokens WHERE token = $1 AND users.id = user_id;
+SELECT users.id, display_name, display_color, users.created_at, disabled_at, previous_names, namechanged_at, authenticated_at, scopes, users.type = 'API' AS is_bot FROM users, user_access_tokens WHERE token = ? AND users.id = user_id;
+
+-- name: GetUserByID :one
+SELECT id, display_name, display_color, created_at, disabled_at, previous_names, namechanged_at, authenticated_at, scopes, type = 'API' AS is_bot FROM users WHERE id = ?;
+
+-- name: GetUsers :many
+SELECT id, display_name, display_color, created_at, disabled_at, previous_names, namechanged_at, authenticated_at, scopes, type = 'API' AS is_bot FROM users ORDER BY created_at DESC;
 
 -- name: GetUserDisplayNameByToken :one
-SELECT display_name FROM users, user_access_tokens WHERE token = $1 AND users.id = user_id AND disabled_at = NULL;
+SELECT display_name FROM users JOIN user_access_tokens ON users.id = user_access_tokens.user_id WHERE token = ? AND users.disabled_at IS NULL;
 
 -- name: SetAccessTokenToOwner :exec
-UPDATE user_access_tokens SET user_id = $1 WHERE token = $2;
+UPDATE user_access_tokens SET user_id = ? WHERE token = ?;
 
 -- name: SetUserAsAuthenticated :exec
-UPDATE users SET authenticated_at = CURRENT_TIMESTAMP WHERE id = $1;
+UPDATE users SET authenticated_at = CURRENT_TIMESTAMP WHERE id = ?;
 
 -- name: GetMessagesFromUser :many
-SELECT id, body, hidden_at, timestamp FROM messages WHERE eventType = 'CHAT' AND user_id = $1 ORDER BY TIMESTAMP DESC;
+SELECT id, body, hidden_at, timestamp FROM messages WHERE eventType = 'CHAT' AND user_id = ? ORDER BY TIMESTAMP DESC;
 
 -- name: IsDisplayNameAvailable :one
-SELECT count(*) FROM users WHERE display_name = $1 AND ( type='API' OR authenticated_at IS NOT NULL ) AND disabled_at IS NULL;
+SELECT count(*) FROM users WHERE display_name = ? AND ( type='API' OR authenticated_at IS NOT NULL ) AND disabled_at IS NULL;
 
 -- name: ChangeDisplayName :exec
-UPDATE users SET display_name = $1, previous_names = previous_names || $2, namechanged_at = $3 WHERE id = $4;
+UPDATE users SET display_name = ?, previous_names = previous_names || ?, namechanged_at = ? WHERE id = ?;
 
 -- name: ChangeDisplayColor :exec
-UPDATE users SET display_color = $1 WHERE id = $2;
+UPDATE users SET display_color = ? WHERE id = ?;
 
--- Recording and clip related queries.
+-- Federated servers queries
+
+-- name: GetFederatedServers :many
+SELECT id, iri, name, logo_url, is_online, stream_title, stream_description, stream_tags, thumbnail_url, last_seen_online, last_status_update, added_at, followed_at, pending, username, display_name, summary, accepted_at, rejected_at, follow_status FROM federated_servers ORDER BY added_at DESC;
+
+-- name: GetFederatedServer :one
+SELECT id, iri, name, logo_url, is_online, stream_title, stream_description, stream_tags, thumbnail_url, last_seen_online, last_status_update, added_at, followed_at, pending, username, display_name, summary, accepted_at, rejected_at, follow_status FROM federated_servers WHERE iri = ?;
+
+-- name: AddFederatedServer :exec
+INSERT INTO federated_servers(iri, name, logo_url, followed_at, pending, username, follow_status) values(?, ?, ?, ?, ?, ?, ?);
+
+-- name: UpdateFederatedServerStatus :exec
+UPDATE federated_servers SET is_online = ?, stream_title = ?, stream_description = ?, stream_tags = ?, thumbnail_url = ?, last_status_update = ? WHERE iri = ?;
+
+-- name: UpdateFederatedServerOnlineStatus :exec
+UPDATE federated_servers SET is_online = ?, last_seen_online = ?, last_status_update = ? WHERE iri = ?;
+
+-- name: RemoveFederatedServer :exec
+DELETE FROM federated_servers WHERE id = ?;
+
+-- name: UpdateFederatedServerFollowStatus :exec
+UPDATE federated_servers SET follow_status = ?, pending = ?, accepted_at = ?, rejected_at = ? WHERE iri = ?;
+
+-- name: UpdateFederatedServerMetadata :exec
+UPDATE federated_servers SET name = ?, display_name = ?, summary = ?, logo_url = ? WHERE iri = ?;
+
+-- name: GetPendingFederatedServers :many
+SELECT id, iri, name, logo_url, is_online, stream_title, stream_description, stream_tags, thumbnail_url, last_seen_online, last_status_update, added_at, followed_at, pending, username, display_name, summary, accepted_at, rejected_at, follow_status FROM federated_servers WHERE pending = true ORDER BY added_at DESC;
+
+-- Recording, replay and clip related queries.
 
 -- name: GetStreams :many
 SELECT id, stream_title, start_time, end_time FROM streams ORDER BY start_time DESC;
 
 -- name: GetStreamById :one
-SELECT id, stream_title, start_time, end_time FROM streams WHERE id = $1 LIMIT 1;
+SELECT id, stream_title, start_time, end_time FROM streams WHERE id = ? LIMIT 1;
 
 -- name: GetOutputConfigurationsForStreamId :many
-SELECT id, stream_id, variant_id, name, segment_duration, bitrate, framerate, resolution_width, resolution_height FROM video_segment_output_configuration WHERE stream_id = $1;
+SELECT id, stream_id, variant_id, name, segment_duration, bitrate, framerate, resolution_width, resolution_height FROM video_segment_output_configuration WHERE stream_id = ?;
 
 -- name: GetOutputConfigurationForId :one
-SELECT id, stream_id, variant_id, name, segment_duration, bitrate, framerate, resolution_width, resolution_height FROM video_segment_output_configuration WHERE id = $1;
+SELECT id, stream_id, variant_id, name, segment_duration, bitrate, framerate, resolution_width, resolution_height FROM video_segment_output_configuration WHERE id = ?;
 
 -- name: GetSegmentsForOutputId :many
-SELECT id, stream_id, output_configuration_id, path, timestamp FROM video_segments WHERE output_configuration_id = $1 ORDER BY timestamp ASC;
+SELECT id, stream_id, output_configuration_id, path, timestamp FROM video_segments WHERE output_configuration_id = ? ORDER BY timestamp ASC;
 
 -- name: GetSegmentsForOutputIdAndWindow :many
-SELECT id, stream_id, output_configuration_id, path, relative_timestamp, timestamp FROM video_segments WHERE output_configuration_id = $1 AND (cast ( relative_timestamp as int ) - ( relative_timestamp < cast ( relative_timestamp as int ))) >= @start_seconds::REAL AND (cast ( relative_timestamp as int ) + ( relative_timestamp > cast ( relative_timestamp as int ))) <= @end_seconds::REAL ORDER BY relative_timestamp ASC;
+SELECT id, stream_id, output_configuration_id, path, relative_timestamp, timestamp FROM video_segments WHERE output_configuration_id = @output_configuration_id AND relative_timestamp >= @start_seconds AND relative_timestamp <= @end_seconds ORDER BY relative_timestamp ASC;
 
 -- name: InsertStream :exec
-INSERT INTO streams (id, stream_title, start_time, end_time) VALUES($1, $2, $3, $4);
+INSERT INTO streams (id, stream_title, start_time, end_time) VALUES(?, ?, ?, ?);
 
 -- name: InsertOutputConfiguration :exec
-INSERT INTO video_segment_output_configuration (id, variant_id, stream_id, name, segment_duration, bitrate, framerate, resolution_width, resolution_height, timestamp) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+INSERT INTO video_segment_output_configuration (id, variant_id, stream_id, name, segment_duration, bitrate, framerate, resolution_width, resolution_height, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: InsertSegment :exec
-INSERT INTO video_segments (id, stream_id, output_configuration_id, path, relative_timestamp, timestamp) VALUES($1, $2, $3, $4, $5, $6);
+INSERT INTO video_segments (id, stream_id, output_configuration_id, path, relative_timestamp, timestamp) VALUES(?, ?, ?, ?, ?, ?);
 
 -- name: SetStreamEnded :exec
-UPDATE streams SET end_time = $1 WHERE id = $2;
+UPDATE streams SET end_time = ? WHERE id = ?;
 
 -- name: InsertClip :exec
-INSERT INTO replay_clips (id, stream_id, clip_title, relative_start_time, relative_end_time, timestamp) VALUES($1, $2, $3, $4, $5, $6);
+INSERT INTO replay_clips (id, stream_id, clip_title, relative_start_time, relative_end_time, timestamp) VALUES(?, ?, ?, ?, ?, ?);
 
 -- name: GetAllClips :many
 SELECT rc.id AS id, rc.clip_title, rc.stream_id, rc.relative_start_time, rc.relative_end_time, (rc.relative_end_time - rc.relative_start_time) AS duration_seconds, rc.timestamp, s.stream_title AS stream_title
 	FROM replay_clips rc
 	JOIN streams s ON rc.stream_id = s.id
-	ORDER BY timestamp DESC;
+	ORDER BY rc.timestamp DESC;
 
 -- name: GetAllClipsForStream :many
 SELECT rc.id AS clip_id, rc.stream_id, rc.clipped_by, rc.clip_title, rc.relative_start_time, rc.relative_end_time, rc.timestamp,
-	s.id AS stream_id, s.stream_title AS stream_title
+	s.stream_title AS stream_title
 	FROM replay_clips rc
 	JOIN streams s ON rc.stream_id = s.id
-	WHERE rc.stream_id = $1
-	ORDER BY timestamp DESC;
+	WHERE rc.stream_id = ?
+	ORDER BY rc.timestamp DESC;
 
 -- name: GetClip :one
-SELECT id AS clip_id, stream_id, clipped_by, clip_title, timestamp AS clip_timestamp, relative_start_time, relative_end_time FROM replay_clips WHERE id = $1;
+SELECT id AS clip_id, stream_id, clipped_by, clip_title, timestamp AS clip_timestamp, relative_start_time, relative_end_time FROM replay_clips WHERE id = ?;
 
 -- name: GetFinalSegmentForStream :one
-SELECT id, stream_id, output_configuration_id, path, relative_timestamp, timestamp FROM video_segments WHERE stream_id = $1 ORDER BY relative_timestamp DESC LIMIT 1;
+SELECT id, stream_id, output_configuration_id, path, relative_timestamp, timestamp FROM video_segments WHERE stream_id = ? ORDER BY relative_timestamp DESC LIMIT 1;
 
 -- name: FixUnfinishedStreams :exec
-UPDATE streams SET end_time = (SELECT timestamp FROM video_segments WHERE stream_id = streams.id) WHERE end_time IS NULL;
+UPDATE streams SET end_time = (SELECT MAX(timestamp) FROM video_segments WHERE stream_id = streams.id) WHERE end_time IS NULL;

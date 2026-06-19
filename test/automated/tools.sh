@@ -2,53 +2,79 @@
 
 set -e
 
+# When a GitHub token is available (e.g. GITHUB_TOKEN in CI), send it on
+# requests to github.com so release-asset downloads use the authenticated
+# 5,000/hour rate limit instead of the anonymous, shared-per-IP 60/hour limit
+# that frequently fails on CI runners. Local runs without a token are
+# unaffected and keep downloading anonymously. curl drops the Authorization
+# header on the cross-host redirect to the asset CDN, so the token is not
+# leaked to objects.githubusercontent.com.
+gh_curl_auth=()
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+	gh_curl_auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+fi
+
 function install_ffmpeg() {
 	# install a specific version of ffmpeg
 
-	FFMPEG_VER="4.4.1"
-	FFMPEG_PATH="$(pwd)/ffmpeg-$FFMPEG_VER"
+	FFMPEG_VER="8.0"
+	FFMPEG_BUILD_VERSION="20260223192056"
+	FFMPEG_PATH="$(pwd)"
 	PATH=$FFMPEG_PATH:$PATH
 
-	if ! [[ -d "$FFMPEG_PATH" ]]; then
-		mkdir "$FFMPEG_PATH"
-	fi
+	case "$OSTYPE" in
+		linux-*) ffmpeg_os="linux" ;;
+		darwin*) ffmpeg_os="darwin" ;;
+		*)
+			echo "Unsupported platform: $OSTYPE"
+			exit 1
+			;;
+	esac
 
-	pushd "$FFMPEG_PATH" >/dev/null
+	case "$(uname -m)" in
+		x86_64 | amd64) ffmpeg_arch="amd64" ;;
+		aarch64 | arm64) ffmpeg_arch="arm64" ;;
+		*)
+			echo "Unsupported architecture: $(uname -m)"
+			exit 1
+			;;
+	esac
+
+	if [[ "$ffmpeg_os" == "linux" ]]; then
+		ffmpeg_asset="ffmpeg${FFMPEG_VER}-linux-${ffmpeg_arch}-static.tar.gz"
+	else
+		ffmpeg_asset="ffmpeg${FFMPEG_VER}-darwin-${ffmpeg_arch}.tar.gz"
+	fi
 
 	if [[ -x "$FFMPEG_PATH/ffmpeg" ]]; then
 
 		ffmpeg_version=$("$FFMPEG_PATH/ffmpeg" -version | awk -F 'ffmpeg version' '{print $2}' | awk 'NR==1{print $1}')
 
-		if [[ "$ffmpeg_version" == "$FFMPEG_VER-static" ]]; then
-			popd >/dev/null
+		# Linux static builds report "8.0-static"; macOS builds report "8.0" or "8.0.1".
+		if [[ "$ffmpeg_version" == "$FFMPEG_VER" || "$ffmpeg_version" == "$FFMPEG_VER".* || "$ffmpeg_version" == "$FFMPEG_VER"-* ]]; then
 			return 0
 		else
 			mv "$FFMPEG_PATH/ffmpeg" "$FFMPEG_PATH/ffmpeg.bk" || rm -f "$FFMPEG_PATH/ffmpeg"
 		fi
 	fi
 
-	rm -f ffmpeg.zip
-	curl -sL --fail https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v${FFMPEG_VER}/ffmpeg-${FFMPEG_VER}-linux-64.zip --output ffmpeg.zip >/dev/null
-	unzip -o ffmpeg.zip >/dev/null && rm -f ffmpeg.zip
+	echo "Downloading ffmpeg v${FFMPEG_VER} release ${FFMPEG_BUILD_VERSION} for ${ffmpeg_os}/${ffmpeg_arch}"
+	rm -rf ffmpeg.tar.gz
+	curl -sL --fail "${gh_curl_auth[@]}" "https://github.com/owncast/ffmpeg-builds/releases/download/${FFMPEG_BUILD_VERSION}/${ffmpeg_asset}" --output ffmpeg.tar.gz >/dev/null
+	tar -xzf ffmpeg.tar.gz
+	rm -f ffmpeg.tar.gz
 	chmod +x ffmpeg
 	PATH=$FFMPEG_PATH:$PATH
-
-	popd >/dev/null
 }
 
 function start_owncast() {
 	# Build and run owncast from source
 	echo "Building owncast..."
 	pushd "$(git rev-parse --show-toplevel)" >/dev/null
-	go build -o owncast main.go
+	CGO_ENABLED=1 go build -o owncast main.go
 
-	if [ -z "$1" ]; then
-		echo "Running owncast..."
-	else
-		echo "Running owncast with flags: $1"
-	fi
-
-	./owncast -database "$TEMP_DB" $1 &
+	echo "Running owncast..."
+	./owncast -database "$TEMP_DB" &
 	SERVER_PID=$!
 	popd >/dev/null
 
@@ -78,11 +104,11 @@ function kill_with_kids() {
 	# kill a process and all its children (by pid)! return no error.
 
 	if [[ -n $1 ]]; then
-		mapfile -t CHILDREN_PID_LIST < <(ps --ppid "$1" -o pid= &>/dev/null || true)
-		for child_pid in "${CHILDREN_PID_LIST[@]}"; do
+		while IFS= read -r child_pid; do
+			[[ -n "$child_pid" ]] || continue
 			kill "$child_pid" &>/dev/null || true
 			wait "$child_pid" &>/dev/null || true
-		done
+		done < <(pgrep -P "$1" 2>/dev/null || true)
 		kill "$1" &>/dev/null || true
 		wait "$1" &>/dev/null || true
 	fi

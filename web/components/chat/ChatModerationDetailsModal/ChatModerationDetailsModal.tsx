@@ -1,6 +1,6 @@
 import { Button, Col, Collapse, Row, Spin, Table, Tag } from 'antd';
 import { FC, useEffect, useState } from 'react';
-import format from 'date-fns/format';
+import { format } from 'date-fns';
 import { ColumnsType } from 'antd/lib/table';
 import dynamic from 'next/dynamic';
 import { ErrorBoundary } from 'react-error-boundary';
@@ -162,7 +162,9 @@ export const ChatModerationDetailsModal: FC<ChatModerationDetailsModalProps> = (
     >
       <Spin spinning={loading}>
         <UserColorBlock color={displayColor} />
-        {scopes?.map(scope => <Tag key={scope}>{scope}</Tag>)}
+        {scopes?.map(scope => (
+          <Tag key={scope}>{scope}</Tag>
+        ))}
         {authenticated && <Tag>Authenticated</Tag>}
         {isBot && <Tag>Bot</Tag>}
         <ValueRow label="Messages Sent Across Clients" value={totalMessagesSent.toString()} />

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/owncast/owncast/models"
+	"github.com/owncast/owncast/webserver/handlers/generated"
 )
 
 // Defaults will hold default configuration values.
@@ -25,12 +26,13 @@ type Defaults struct {
 	WebServerIP        string
 	Name               string
 	AdminPassword      string
-	StreamKeys         []models.StreamKey
+	StreamKeys         []generated.StreamKey
 
 	StreamVariants []models.StreamOutputVariant
 
 	Tags               []string
 	RTMPServerPort     int
+	RTMPBindAddress    string
 	SegmentsInPlaylist int
 
 	SegmentLengthSeconds int
@@ -43,14 +45,16 @@ type Defaults struct {
 
 // GetDefaults will return default configuration values.
 func GetDefaults() Defaults {
+	defaultStreamKey := "abc123"
+	defaultStreamKeyComment := "Default stream key"
 	return Defaults{
 		Name:                 "New Owncast Server",
 		Summary:              "This is a new live video streaming server powered by Owncast.",
 		ServerWelcomeMessage: "",
 		Logo:                 "logo.svg",
 		AdminPassword:        "abc123",
-		StreamKeys: []models.StreamKey{
-			{Key: "abc123", Comment: "Default stream key"},
+		StreamKeys: []generated.StreamKey{
+			{Key: &defaultStreamKey, Comment: &defaultStreamKeyComment},
 		},
 		Tags: []string{
 			"owncast",
@@ -62,7 +66,7 @@ func GetDefaults() Defaults {
 
 - This is a live stream powered by [Owncast](https://owncast.online), a free and open source live streaming server.
 
-- To discover more examples of streams, visit [Owncast's directory](https://directory.owncast.online).
+- To discover more examples of streams, visit [Owncast's directory](https://owncast.directory).
 
 - If you're the owner of this server you should visit the admin and customize the content on this page.
 
@@ -76,7 +80,7 @@ func GetDefaults() Defaults {
 		DatabaseFilePath: "data/owncast.db",
 
 		YPEnabled: false,
-		YPServer:  "https://directory.owncast.online",
+		YPServer:  "https://owncast.directory",
 
 		WebServerPort:  8080,
 		WebServerIP:    "0.0.0.0",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, FC } from 'react';
 import dynamic from 'next/dynamic';
+import { useTranslation } from 'next-export-i18n';
 import styles from './NotifyReminderPopup.module.scss';
 import { Popover } from '../Popover/Popover';
 
@@ -24,6 +25,7 @@ export const NotifyReminderPopup: FC<NotifyReminderPopupProps> = ({
 }) => {
   const [openPopup, setOpenPopup] = useState(open);
   const [mounted, setMounted] = useState(false);
+  const { t } = useTranslation();
 
   useEffect(() => {
     setOpenPopup(open);
@@ -33,7 +35,7 @@ export const NotifyReminderPopup: FC<NotifyReminderPopupProps> = ({
     setMounted(true);
   }, []);
 
-  const title = <div className={styles.title}>Stay updated!</div>;
+  const title = <div className={styles.title}>{t('Stay updated!')}</div>;
 
   const popupClicked = e => {
     e.stopPropagation();
@@ -48,10 +50,15 @@ export const NotifyReminderPopup: FC<NotifyReminderPopupProps> = ({
 
   const content = (
     <div onClick={popupClicked} onKeyDown={popupClicked} role="menuitem" tabIndex={0}>
-      <button type="button" className={styles.closebutton} onClick={popupClosed}>
+      <button
+        type="button"
+        aria-label="Follow"
+        className={styles.closebutton}
+        onClick={popupClosed}
+      >
         <CloseOutlined />
       </button>
-      <div className={styles.contentbutton}>Click and never miss future streams!</div>
+      <div className={styles.contentbutton}>{t('Click and never miss future streams!')}</div>
     </div>
   );
 

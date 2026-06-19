@@ -1,14 +1,29 @@
+# This workflow runs browser-based tests using Cypress
+# Triggers:
+#   - Push/PR with web, Go backend, or browser test changes
+# Note: Browser tests require both frontend and backend
+
 name: Browser Tests
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'web/**'
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
       - 'test/automated/browser/**'
+      - '.github/workflows/browser-testing.yml'
   pull_request:
     paths:
       - 'web/**'
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
       - 'test/automated/browser/**'
+      - '.github/workflows/browser-testing.yml'
 
 jobs:
   cypress-run:
@@ -19,15 +34,46 @@ jobs:
         with:
           concurrent_skipping: 'same_content_newer'
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v3
+      - name: Check out pull request code
+        uses: actions/checkout@v6
+        if: github.event_name == 'pull_request'
         with:
-          node-version: 18.9.0
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Fetch base branch for comparison
+        if: github.event_name == 'pull_request'
+        run: |
+          git remote add upstream https://github.com/${{ github.event.pull_request.base.repo.full_name }}.git || true
+          git fetch upstream ${{ github.event.pull_request.base.ref }}
+
+      - name: Check out repository code
+        uses: actions/checkout@v6
+        if: github.event_name == 'push'
+
+      - name: Get changed files
+        id: changed-files-yaml
+        uses: tj-actions/changed-files@v47
+        with:
+          files_yaml: |
+            testable:
+              - 'web/**/*.{tsx,ts,jsx,js,css,scss}'
+              - 'test/automated/browser/**'
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+            docs:
+              - '**/*.md'
+
+      - uses: actions/setup-node@v6
+        if: steps.changed-files-yaml.outputs.testable_any_changed == 'true'
+        with:
+          node-version: '24.12.0'
 
       - name: Cache node modules
-        uses: actions/cache@v3
+        if: steps.changed-files-yaml.outputs.testable_any_changed == 'true'
+        uses: actions/cache@v5
         env:
           cache-name: cache-node-modules-browser-tests
         with:
@@ -38,16 +84,23 @@ jobs:
             ${{ runner.os }}-build-
             ${{ runner.os }}-
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v6
+        if: steps.changed-files-yaml.outputs.testable_any_changed == 'true'
         with:
-          go-version: '1.21'
+          go-version: '1.26.4'
           cache: true
 
       - name: Install Google Chrome
+        if: steps.changed-files-yaml.outputs.testable_any_changed == 'true'
         run: sudo apt-get update && sudo apt-get install google-chrome-stable
 
       - name: Run Browser tests
-        uses: nick-fields/retry@v2
+        if: steps.changed-files-yaml.outputs.testable_any_changed == 'true'
+        uses: nick-fields/retry@v4
+        env:
+          # Authenticates github.com downloads in tools.sh (ffmpeg) to avoid
+          # the anonymous, shared-per-IP rate limit on CI runners.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           timeout_minutes: 20
           max_attempts: 3

@@ -11,10 +11,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-//go:embed web/*
-//go:embed web/_next/static
-//go:embed web/_next/static/chunks/pages/*.js
-//go:embed web/_next/static/*/*.js
+// The 'all:' prefix is used to include all files and subdirectories under 'web/'.
+// This avoids errors if optional subdirectories (e.g., 'web/_next') are missing.
+//
+//go:embed all:web/*
 var webFiles embed.FS
 
 // GetWeb will return an embedded filesystem reference to the admin web app.
@@ -51,12 +51,12 @@ func GetWebIndexTemplate() (*template.Template, error) {
 	return tmpl, err
 }
 
-//go:embed offline.tsclip
+//go:embed offline-v2.ts
 var offlineVideoSegment []byte
 
 // GetOfflineSegment will return the offline video segment data.
 func GetOfflineSegment() []byte {
-	return getFileSystemStaticFileOrDefault("offline.tsclip", offlineVideoSegment)
+	return getFileSystemStaticFileOrDefault("offline-v2.ts", offlineVideoSegment)
 }
 
 //go:embed img/logo.png
@@ -65,6 +65,14 @@ var logo []byte
 // GetLogo will return the logo data.
 func GetLogo() []byte {
 	return getFileSystemStaticFileOrDefault("img/logo.png", logo)
+}
+
+//go:embed favicon.png
+var favicon []byte
+
+// GetFavicon will return the favicon data.
+func GetFavicon() []byte {
+	return getFileSystemStaticFileOrDefault("favicon.png", favicon)
 }
 
 func getFileSystemStaticFileOrDefault(path string, defaultData []byte) []byte {

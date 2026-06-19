@@ -138,6 +138,7 @@ export interface ConfigDetails {
   ffmpegPath: string;
   instanceDetails: ConfigInstanceDetailsFields;
   rtmpServerPort: string;
+  rtmpServerAddress: string;
   s3: S3Field;
   streamKeys: StreamKey[];
   streamKeyOverridden: boolean;
@@ -152,6 +153,9 @@ export interface ConfigDetails {
   forbiddenUsernames: string[];
   suggestedUsernames: string[];
   chatDisabled: boolean;
+  chatSpamProtectionEnabled: boolean;
+  chatSlurFilterEnabled: boolean;
+  chatRequireAuthentication: boolean;
   federation: Federation;
   notifications: NotificationsConfig;
   chatJoinMessagesEnabled: boolean;

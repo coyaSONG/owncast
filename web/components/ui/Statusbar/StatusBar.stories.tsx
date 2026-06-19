@@ -1,25 +1,42 @@
-import React from 'react';
-import { ComponentStory, ComponentMeta } from '@storybook/react';
-import { subHours } from 'date-fns';
+import { Meta } from '@storybook/nextjs';
+import { subHours, subMinutes, subSeconds } from 'date-fns';
 import { Statusbar } from './Statusbar';
 
-export default {
+const meta = {
   title: 'owncast/Player/Status bar',
   component: Statusbar,
   parameters: {},
-} as ComponentMeta<typeof Statusbar>;
+} satisfies Meta<typeof Statusbar>;
 
-const Template: ComponentStory<typeof Statusbar> = args => <Statusbar {...args} />;
+export default meta;
 
-export const Online = Template.bind({});
-Online.args = {
-  online: true,
-  viewerCount: 42,
-  lastConnectTime: subHours(new Date(), 3),
+export const Online = {
+  args: {
+    online: true,
+    viewerCount: 42,
+    lastConnectTime: subSeconds(subMinutes(subHours(new Date(), 3), 17), 22),
+  },
 };
 
-export const Offline = Template.bind({});
-Offline.args = {
-  online: false,
-  lastDisconnectTime: subHours(new Date(), 3),
+export const Minutes = {
+  args: {
+    online: true,
+    viewerCount: 42,
+    lastConnectTime: subSeconds(subMinutes(new Date(), 17), 22),
+  },
+};
+
+export const DaysAgo = {
+  args: {
+    online: true,
+    viewerCount: 42,
+    lastConnectTime: subHours(new Date(), 17),
+  },
+};
+
+export const Offline = {
+  args: {
+    online: false,
+    lastDisconnectTime: subHours(new Date(), 3),
+  },
 };

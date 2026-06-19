@@ -1,41 +1,60 @@
-import React, { useEffect } from 'react';
-import { ComponentStory, ComponentMeta } from '@storybook/react';
+import { useEffect } from 'react';
+import { StoryFn, Meta } from '@storybook/nextjs';
 import { RecoilRoot, useSetRecoilState } from 'recoil';
 import { UserDropdown } from './UserDropdown';
 import { CurrentUser } from '../../../interfaces/current-user';
-import { currentUserAtom } from '../../stores/ClientConfigStore';
+import {
+  currentUserAtom,
+  appStateAtom,
+  chatStateAtom,
+  ChatState,
+} from '../../stores/ClientConfigStore';
 
-export default {
+const meta = {
   title: 'owncast/Components/User settings menu',
   component: UserDropdown,
   parameters: {},
-} as ComponentMeta<typeof UserDropdown>;
+} satisfies Meta<typeof UserDropdown>;
+
+export default meta;
 
 // This component uses Recoil internally so wrap it in a RecoilRoot.
 const Example = args => {
   const setCurrentUser = useSetRecoilState<CurrentUser>(currentUserAtom);
+  const setAppState = useSetRecoilState(appStateAtom);
+  const setChatState = useSetRecoilState(chatStateAtom);
 
-  useEffect(
-    () =>
-      setCurrentUser({
-        id: '1',
-        displayName: 'Test User',
-        displayColor: 3,
-        isModerator: false,
-      }),
-    [],
-  );
+  useEffect(() => {
+    setCurrentUser({
+      id: '1',
+      displayName: 'Test User',
+      displayColor: 3,
+      isModerator: false,
+    });
+
+    setAppState({
+      chatAvailable: true,
+      chatLoading: false,
+      videoAvailable: true,
+      appLoading: false,
+    });
+
+    setChatState(ChatState.VISIBLE);
+  }, []);
 
   return <UserDropdown id="user-menu" {...args} />;
 };
 
-const Template: ComponentStory<typeof UserDropdown> = args => (
+const Template: StoryFn<typeof UserDropdown> = args => (
   <RecoilRoot>
     <Example {...args} />
   </RecoilRoot>
 );
 
-export const ChatEnabled = Template.bind({});
-ChatEnabled.args = {
-  username: 'test-user',
+export const ChatEnabled = {
+  render: Template,
+
+  args: {
+    username: 'test-user',
+  },
 };

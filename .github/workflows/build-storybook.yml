@@ -1,9 +1,26 @@
+# This workflow builds and deploys Storybook component documentation
+# Triggers:
+#   - Push to develop branch with changes to:
+#     - web/stories/** (story files)
+#     - web/components/** (component source)
+#     - web/.storybook/** (Storybook config)
+#     - web/i18n/** (translations)
+# Output:
+#   - Generates updated story files
+#   - Builds Storybook to docs/components
+#   - Dispatches event to owncast.github.io for deployment
+
 name: Build and Deploy Components+Style Guide
 on:
   push:
     branches:
       - develop
-    paths: ['web/stories/**', 'web/components/**', 'web/.storybook/**'] # Trigger the action only when files change in the folders defined here
+    paths: [
+        'web/stories/**',
+        'web/components/**',
+        'web/.storybook/**',
+        'web/i18n/**',
+      ] # Trigger the action only when files change in the folders defined here
 
 jobs:
   build-and-deploy:
@@ -11,11 +28,26 @@ jobs:
     if: github.repository == 'owncast/owncast'
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          concurrent_skipping: 'same_content_newer'
+          cancel_others: 'true'
+          skip_after_successful_duplicate: 'true'
+
+      - name: Check out pull request code
+        uses: actions/checkout@v6
+        if: github.event_name == 'pull_request'
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Check out repository code
+        uses: actions/checkout@v6
+        if: github.event_name == 'push'
 
       - name: Cache node modules
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         env:
           cache-name: cache-node-modules-bundle-web-app
         with:
@@ -36,7 +68,8 @@ jobs:
           npm run build-storybook -- -o ../docs/components
 
       - name: Commit changes
-        uses: EndBug/add-and-commit@v9
+        if: github.repository == 'owncast/owncast'
+        uses: EndBug/add-and-commit@v10
         with:
           author_name: Owncast
           author_email: owncast@owncast.online
@@ -47,7 +80,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Dispatch event to web site
-        uses: peter-evans/repository-dispatch@v2
+        if: github.repository == 'owncast/owncast'
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ secrets.BUNDLE_STORYBOOK_OWNCAST_ONLINE }}
           repository: owncast/owncast.github.io

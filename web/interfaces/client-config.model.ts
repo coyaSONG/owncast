@@ -9,8 +9,17 @@ export interface ClientConfig {
   extraPageContent: string;
   socialHandles: SocialHandle[];
   chatDisabled: boolean;
+  chatRequireAuthentication: boolean;
   externalActions: any[];
+  // customStyles is the admin's CSS plus the concatenated content of
+  // every loaded plugin's manifest.styles entries (the host
+  // pre-merges them server-side). Theme.tsx renders this as one
+  // inline <style> block.
   customStyles: string;
+  // pluginTabs is the list of viewer-page tabs contributed by
+  // loaded plugins via manifest.tabs. DesktopContent / MobileContent
+  // render one tab per entry alongside the built-in tabs.
+  pluginTabs: PluginTab[];
   appearanceVariables: Map<string, string>;
   maxSocketPayloadSize: number;
   federation: Federation;
@@ -44,6 +53,15 @@ interface SocialHandle {
   icon: string;
 }
 
+// PluginTab is one viewer-page tab contributed by a plugin via
+// manifest.tabs. Mirrors models.PluginTab on the backend.
+export interface PluginTab {
+  slug: string; // composite unique key: pluginSlug/tabSlug
+  pluginSlug: string; // source plugin identifier
+  title: string;
+  html: string;
+}
+
 export function makeEmptyClientConfig(): ClientConfig {
   return {
     name: '',
@@ -55,8 +73,10 @@ export function makeEmptyClientConfig(): ClientConfig {
     extraPageContent: '',
     socialHandles: [],
     chatDisabled: false,
+    chatRequireAuthentication: false,
     externalActions: [],
     customStyles: '',
+    pluginTabs: [],
     appearanceVariables: new Map(),
     maxSocketPayloadSize: 0,
     federation: {

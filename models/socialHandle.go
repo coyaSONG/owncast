@@ -105,7 +105,7 @@ func GetAllSocialHandles() map[string]SocialHandle {
 			Icon:     "/img/platformlogos/twitch.svg",
 		},
 		"twitter": {
-			Platform: "Twitter",
+			Platform: "X",
 			Icon:     "/img/platformlogos/twitter.svg",
 		},
 		"youtube": {
@@ -124,6 +124,10 @@ func GetAllSocialHandles() map[string]SocialHandle {
 			Platform: "LiberaPay",
 			Icon:     "/img/platformlogos/liberapay.svg",
 		},
+		"bluesky": {
+			Platform: "BlueSky",
+			Icon:     "/img/platformlogos/bluesky.svg",
+		},
 		"donate": {
 			Platform: "Donations",
 			Icon:     "/img/platformlogos/donate.svg",
@@ -131,6 +135,14 @@ func GetAllSocialHandles() map[string]SocialHandle {
 		"follow": {
 			Platform: "Follow",
 			Icon:     "/img/platformlogos/follow.svg",
+		},
+		"pixelfed": {
+			Platform: "Pixelfed",
+			Icon:     "/img/platformlogos/pixelfed.svg",
+		},
+		"peertube": {
+			Platform: "Peertube",
+			Icon:     "/img/platformlogos/peertube.svg",
 		},
 	}
 

@@ -4,9 +4,11 @@ import MessageFilled from '@ant-design/icons/MessageFilled';
 import { FC, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import classnames from 'classnames';
+import { useTranslation } from 'next-export-i18n';
 import ActionButtons from './ActionButtons';
 import { LOCAL_STORAGE_KEYS, getLocalStorage, setLocalStorage } from '../../../utils/localStorage';
 import { canPushNotificationsBeSupported } from '../../../utils/browserPushNotifications';
+import { Localization } from '../../../types/localization';
 
 import {
   clientConfigStateAtom,
@@ -19,6 +21,7 @@ import {
   serverStatusState,
   isChatAvailableSelector,
   visibleChatMessagesSelector,
+  chatAuthenticatedAtom,
 } from '../../stores/ClientConfigStore';
 import { ClientConfig } from '../../../interfaces/client-config.model';
 
@@ -35,6 +38,7 @@ import { DesktopContent } from './DesktopContent';
 import { MobileContent } from './MobileContent';
 import { ChatModal } from '../../modals/ChatModal/ChatModal';
 import { Footer } from '../Footer/Footer';
+import { useFederatedServers } from '../../../hooks/useFederatedServers';
 
 // Lazy loaded components
 const ChatContainer = dynamic(
@@ -97,6 +101,7 @@ const ExternalModal = ({ externalActionToDisplay, setExternalActionToDisplay }) 
 };
 
 export const Content: FC = () => {
+  const { t } = useTranslation();
   const appState = useRecoilValue<AppStateOptions>(appStateAtom);
   const clientConfig = useRecoilValue<ClientConfig>(clientConfigStateAtom);
   const chatState = useRecoilValue<ChatState>(chatStateAtom);
@@ -106,6 +111,7 @@ export const Content: FC = () => {
   const messages = useRecoilValue<ChatMessage[]>(visibleChatMessagesSelector);
   const online = useRecoilValue<boolean>(isOnlineSelector);
   const isChatAvailable = useRecoilValue<boolean>(isChatAvailableSelector);
+  const isUserAuthenticated = useRecoilValue<boolean>(chatAuthenticatedAtom);
 
   const { viewerCount, lastConnectTime, lastDisconnectTime, streamTitle } =
     useRecoilValue<ServerStatus>(serverStatusState);
@@ -118,8 +124,10 @@ export const Content: FC = () => {
     externalActions,
     offlineMessage,
     chatDisabled,
+    chatRequireAuthentication,
     federation,
     notifications,
+    pluginTabs,
   } = clientConfig;
   const [showNotifyReminder, setShowNotifyReminder] = useState(false);
   const [showNotifyModal, setShowNotifyModal] = useState(false);
@@ -133,6 +141,7 @@ export const Content: FC = () => {
 
   const [supportsBrowserNotifications, setSupportsBrowserNotifications] = useState(false);
   const supportFediverseFeatures = fediverseEnabled;
+  const { servers: federatedServers } = useFederatedServers();
 
   const [showChatModal, setShowChatModal] = useState(false);
 
@@ -140,7 +149,11 @@ export const Content: FC = () => {
     const { openExternally, url } = action;
 
     if (url) {
-      const updatedUrl = new URL(url);
+      // Plugin-contributed actions can use root-relative URLs (e.g.
+      // "/plugins/<name>/") that the host validates and rewrites. Pass
+      // window.location.origin as the base so URL() accepts both
+      // absolute external URLs and same-origin plugin paths.
+      const updatedUrl = new URL(url, window.location.origin);
       updatedUrl.searchParams.append('instance', currentBrowserWindowUrl);
 
       if (currentUser) {
@@ -219,6 +232,16 @@ export const Content: FC = () => {
 
   const showChat = isChatAvailable && !chatDisabled && chatState === ChatState.VISIBLE;
 
+  // Determine if chat input should be enabled based on authentication requirements.
+  // Moderators bypass the authentication requirement.
+  const chatInputEnabled = !!(
+    isChatAvailable &&
+    (!chatRequireAuthentication || isUserAuthenticated || currentUser?.isModerator)
+  );
+  const chatInputDisabledMessage = chatRequireAuthentication
+    ? t(Localization.Frontend.Chat.authenticateToChat)
+    : t(Localization.Frontend.chatDisabled);
+
   return (
     <div className={styles.main}>
       <div className={styles.mainColumn}>
@@ -274,7 +297,6 @@ export const Content: FC = () => {
             setShowNotifyModal={setShowNotifyModal}
             disableNotifyReminderPopup={disableNotifyReminderPopup}
             externalActions={externalActions || []}
-            setExternalActionToDisplay={setExternalActionToDisplay}
             setShowFollowModal={setShowFollowModal}
             externalActionSelected={externalActionSelected}
           />
@@ -297,9 +319,11 @@ export const Content: FC = () => {
               tags={tags}
               socialHandles={socialHandles}
               extraPageContent={extraPageContent}
+              pluginTabs={pluginTabs}
               setShowFollowModal={setShowFollowModal}
               supportFediverseFeatures={supportFediverseFeatures}
               online={online}
+              federatedServers={federatedServers}
             />
           ) : (
             <div className={desktopStyles.bottomSectionContent}>
@@ -309,8 +333,10 @@ export const Content: FC = () => {
                 tags={tags}
                 socialHandles={socialHandles}
                 extraPageContent={extraPageContent}
+                pluginTabs={pluginTabs}
                 setShowFollowModal={setShowFollowModal}
                 supportFediverseFeatures={supportFediverseFeatures}
+                federatedServers={federatedServers}
               />
             </div>
           )}
@@ -326,6 +352,8 @@ export const Content: FC = () => {
           isModerator={currentUser.isModerator}
           chatAvailable={isChatAvailable}
           showInput={!!currentUser}
+          inputEnabled={chatInputEnabled}
+          inputDisabledPlaceholder={chatInputDisabledMessage}
           desktop
         />
       )}
@@ -352,9 +380,11 @@ export const Content: FC = () => {
           messages={messages}
           currentUser={currentUser}
           handleClose={() => setShowChatModal(false)}
+          inputEnabled={chatInputEnabled}
+          inputDisabledPlaceholder={chatInputDisabledMessage}
         />
       )}
-      {isMobile && isChatAvailable && (
+      {isMobile && isChatAvailable && !chatDisabled && (
         <Button
           id="mobile-chat-button"
           type="primary"

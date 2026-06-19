@@ -1,6 +1,7 @@
 import { Virtuoso } from 'react-virtuoso';
 import { useState, useMemo, useRef, CSSProperties, FC, useEffect } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
+import { Interweave } from 'interweave';
 import {
   ConnectedClientInfoEvent,
   FediverseEvent,
@@ -13,8 +14,7 @@ import { ChatUserMessage } from '../ChatUserMessage/ChatUserMessage';
 import { ChatTextField } from '../ChatTextField/ChatTextField';
 import { ChatModeratorNotification } from '../ChatModeratorNotification/ChatModeratorNotification';
 import { ChatSystemMessage } from '../ChatSystemMessage/ChatSystemMessage';
-import { ChatJoinMessage } from '../ChatJoinMessage/ChatJoinMessage';
-import { ChatPartMessage } from '../ChatPartMessage/ChatPartMessage';
+import { ChatEventMessage, ChatEventType } from '../ChatEventMessage/ChatEventMessage';
 import { ScrollToBotBtn } from './ScrollToBotBtn';
 import { ChatActionMessage } from '../ChatActionMessage/ChatActionMessage';
 import { ChatSocialMessage } from '../ChatSocialMessage/ChatSocialMessage';
@@ -32,6 +32,9 @@ export type ChatContainerProps = {
   chatAvailable: boolean;
   focusInput?: boolean;
   desktop?: boolean;
+  readonly?: boolean;
+  inputEnabled?: boolean;
+  inputDisabledPlaceholder?: string;
 };
 
 let resizeWindowCallback: () => void;
@@ -78,12 +81,17 @@ export const ChatContainer: FC<ChatContainerProps> = ({
   usernameToHighlight,
   chatUserId,
   isModerator,
-  showInput,
-  height,
-  chatAvailable: chatEnabled,
+  showInput = true,
+  height = 'auto',
+  chatAvailable,
   desktop,
   focusInput = true,
+  readonly = false,
+  inputEnabled,
+  inputDisabledPlaceholder,
 }) => {
+  // If inputEnabled is explicitly set, use that; otherwise fall back to chatAvailable
+  const chatInputEnabled = inputEnabled !== undefined ? inputEnabled : chatAvailable;
   const [showScrollToBottomButton, setShowScrollToBottomButton] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(false);
 
@@ -130,7 +138,8 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     } = message;
     const isAuthorModerator = checkIsModerator(message);
     return (
-      <ChatJoinMessage
+      <ChatEventMessage
+        type={ChatEventType.Join}
         displayName={displayName}
         userColor={displayColor}
         isAuthorModerator={isAuthorModerator}
@@ -144,7 +153,8 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     } = message;
     const isAuthorModerator = checkIsModerator(message);
     return (
-      <ChatPartMessage
+      <ChatEventMessage
+        type={ChatEventType.Part}
         displayName={displayName}
         userColor={displayColor}
         isAuthorModerator={isAuthorModerator}
@@ -317,6 +327,24 @@ export const ChatContainer: FC<ChatContainerProps> = ({
     }
   }
 
+  // Retrieve, clean, and attach username to newest chat message to be read out by screenreader
+  function getLastMessage() {
+    if (messages.length > 0 && typeof messages[messages.length - 1].body !== 'undefined') {
+      const lastMessage = messages[messages.length - 1];
+      const message = lastMessage.body.replace(/(<([^>]+)>)/gi, '');
+      let stringToRead = '';
+      if (typeof lastMessage.user !== 'undefined') {
+        const username = lastMessage.user.displayName;
+        stringToRead = `${username} said ${message}`;
+      } else {
+        stringToRead = `System message: ${message}`;
+      }
+      return stringToRead;
+    }
+    return '';
+  }
+  const lastMessage = getLastMessage();
+
   if (resizeWindowCallback) window.removeEventListener('resize', resizeWindowCallback);
   if (desktop) {
     window.addEventListener('resize', resize);
@@ -337,25 +365,28 @@ export const ChatContainer: FC<ChatContainerProps> = ({
       )}
     >
       <div
+        aria-live="off"
         id="chat-container"
-        className={styles.chatContainer}
+        className={`${styles.chatContainer}${readonly ? ' readonly-chat' : ''}`}
         style={desktop && { width: `${defaultChatWidth}px` }}
       >
         {MessagesTable}
         {showInput && (
           <div className={styles.chatTextField}>
-            <ChatTextField enabled={chatEnabled} focusInput={focusInput} />
+            <ChatTextField
+              enabled={chatInputEnabled}
+              focusInput={focusInput}
+              disabledPlaceholder={inputDisabledPlaceholder}
+            />
           </div>
         )}
         {desktop && (
           <div className={styles.resizeHandle} onMouseDown={startDrag} role="presentation" />
         )}
       </div>
+      <span className={styles.chatAccessibilityHidden} aria-live="polite">
+        <Interweave content={lastMessage} />
+      </span>
     </ErrorBoundary>
   );
-};
-
-ChatContainer.defaultProps = {
-  showInput: true,
-  height: 'auto',
 };

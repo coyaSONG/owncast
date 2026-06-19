@@ -18,7 +18,7 @@ export function isValidUrl(url: string, validProtocols: string[] = ['http:', 'ht
     ) {
       return false;
     }
-  } catch (e) {
+  } catch {
     return false;
   }
 
@@ -53,33 +53,6 @@ export function isValidAccount(account: string, protocol: string): boolean {
 }
 
 /**
- * Determines if an account is valid by simply checking for a protocol, username
- * and server, delimited by a colon. For example: @username:example.com
- * @param {string} account - An account to validate. Example: @me:matrix.org
- * @returns {boolean} - True if the account is valid, false otherwise.
- */
-export function isValidMatrixAccount(account: string): boolean {
-  if (account.startsWith('matrix:')) {
-    // eslint-disable-next-line no-param-reassign
-    account = account.slice(7);
-  }
-
-  if (account.startsWith('@')) {
-    // eslint-disable-next-line no-param-reassign
-    account = account.slice(1);
-  }
-
-  const components = account.split(':');
-  const [user, host] = components;
-
-  if (components.length !== 2 || !user || !host) {
-    return false;
-  }
-
-  return true;
-}
-
-/**
  * Determines if a fediverse account is valid.
  * For example: @username@example.com
  * @param {string} account - An account to validate.
@@ -87,7 +60,31 @@ export function isValidMatrixAccount(account: string): boolean {
  */
 export function isValidFediverseAccount(account: string): boolean {
   const sanitized = account.replace(/^@+/, '');
-  const regex =
-    /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
-  return regex.test(String(sanitized).toLowerCase());
+  const separatorIndex = sanitized.lastIndexOf('@');
+
+  if (separatorIndex <= 0 || separatorIndex === sanitized.length - 1) {
+    return false;
+  }
+
+  const username = sanitized.slice(0, separatorIndex);
+  const host = sanitized.slice(separatorIndex + 1);
+
+  if (!/^[^\s@]+$/.test(username) || /\s/.test(host)) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(`https://${host}`);
+    const { hostname } = parsed;
+
+    return (
+      hostname !== '' &&
+      hostname.includes('.') &&
+      parsed.pathname === '/' &&
+      parsed.search === '' &&
+      parsed.hash === ''
+    );
+  } catch {
+    return false;
+  }
 }

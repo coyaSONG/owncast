@@ -6,11 +6,14 @@ import (
 	"time"
 )
 
+// FlexibleDate wraps time.Time to allow unmarshalling dates that may arrive in
+// a number of different string formats.
 type FlexibleDate struct {
 	time.Time
 }
 
-func (self *FlexibleDate) UnmarshalJSON(b []byte) (err error) {
+// UnmarshalJSON parses a JSON-encoded date string into the FlexibleDate.
+func (d *FlexibleDate) UnmarshalJSON(b []byte) (err error) {
 	s := string(b)
 
 	// Get rid of the quotes "" around the value.
@@ -21,12 +24,12 @@ func (self *FlexibleDate) UnmarshalJSON(b []byte) (err error) {
 		return err
 	}
 
-	self.Time = result
+	d.Time = result
 
 	return
 }
 
-// FlexibleDateParse is a convinience function to parse a date that could be
+// FlexibleDateParse is a convenience function to parse a date that could be
 // a string, a time.Time, or a sql.NullTime.
 func FlexibleDateParse(date interface{}) (time.Time, error) {
 	// If it's within a sql.NullTime wrapper, return the time from that.

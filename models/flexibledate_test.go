@@ -8,7 +8,7 @@ import (
 )
 
 func TestFlexibleDateParsing(t *testing.T) {
-	type testJson struct {
+	type testJSON struct {
 		Testdate FlexibleDate `json:"testdate"`
 	}
 
@@ -27,10 +27,10 @@ func TestFlexibleDateParsing(t *testing.T) {
 	}
 
 	for testString, expectedTime := range testStrings {
-		testJsonString := `{"testdate":"` + testString + `"}`
-		response := testJson{}
+		testJSONString := `{"testdate":"` + testString + `"}`
+		response := testJSON{}
 
-		err := json.Unmarshal([]byte(testJsonString), &response)
+		err := json.Unmarshal([]byte(testJSONString), &response)
 		if err != nil {
 			t.Error(err)
 		}

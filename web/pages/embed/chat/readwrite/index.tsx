@@ -1,6 +1,8 @@
 /* eslint-disable react/no-unknown-property */
 import { useRecoilValue } from 'recoil';
 import { useEffect } from 'react';
+import Head from 'next/head';
+import { useTranslation } from 'next-export-i18n';
 import { ErrorBoundary } from 'react-error-boundary';
 import { ChatMessage } from '../../../../interfaces/chat-message.model';
 import { ChatContainer } from '../../../../components/chat/ChatContainer/ChatContainer';
@@ -12,6 +14,7 @@ import {
   appStateAtom,
   serverStatusState,
   isChatAvailableSelector,
+  chatAuthenticatedAtom,
 } from '../../../../components/stores/ClientConfigStore';
 import Header from '../../../../components/ui/Header/Header';
 import { ClientConfig } from '../../../../interfaces/client-config.model';
@@ -19,8 +22,10 @@ import { AppStateOptions } from '../../../../components/stores/application-state
 import { ServerStatus } from '../../../../interfaces/server-status.model';
 import { Theme } from '../../../../components/theme/Theme';
 import { ComponentError } from '../../../../components/ui/ComponentError/ComponentError';
+import { Localization } from '../../../../types/localization';
 
 export default function ReadWriteChatEmbed() {
+  const { t } = useTranslation();
   const currentUser = useRecoilValue(currentUserAtom);
   const messages = useRecoilValue<ChatMessage[]>(visibleChatMessagesSelector);
   const clientConfig = useRecoilValue<ClientConfig>(clientConfigStateAtom);
@@ -28,12 +33,25 @@ export default function ReadWriteChatEmbed() {
 
   const appState = useRecoilValue<AppStateOptions>(appStateAtom);
   const isChatAvailable = useRecoilValue(isChatAvailableSelector);
+  const isUserAuthenticated = useRecoilValue<boolean>(chatAuthenticatedAtom);
 
-  const { name, chatDisabled } = clientConfig;
+  const { name, chatDisabled, chatRequireAuthentication } = clientConfig;
+
+  // Determine if chat input should be enabled based on authentication requirements.
+  // Moderators bypass the authentication requirement.
+  const chatInputEnabled = !!(
+    isChatAvailable &&
+    (!chatRequireAuthentication || isUserAuthenticated || currentUser?.isModerator)
+  );
+  const chatInputDisabledMessage = chatRequireAuthentication
+    ? t(Localization.Frontend.Chat.authenticateToChat)
+    : t(Localization.Frontend.chatDisabled);
   const { videoAvailable } = appState;
   const { streamTitle, online } = clientStatus;
 
   const headerText = online ? streamTitle || name : name;
+
+  const pageTitle = name ? t(Localization.Frontend.chatEmbedTitle, { name }) : 'Chat';
 
   // This is a hack to force a specific body background color for just this page.
   useEffect(() => {
@@ -42,10 +60,35 @@ export default function ReadWriteChatEmbed() {
 
   return (
     <div>
+      <Head>
+        <title>{pageTitle}</title>
+      </Head>
       <style jsx global>
         {`
           .body-background {
             background: var(--theme-color-components-chat-background);
+          }
+          .embed-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            height: 100dvh;
+            overflow: hidden;
+          }
+          .embed-container > #chat-container {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+          }
+          .embed-container #chat-container #chat-container {
+            flex: 1 1 0;
+            min-height: 0;
+          }
+          .embed-container #chat-container #virtuoso {
+            flex: 1;
+            min-height: 0;
+            height: auto !important;
           }
         `}
       </style>
@@ -55,27 +98,31 @@ export default function ReadWriteChatEmbed() {
           <ComponentError componentName="ReadWriteChatEmbed" message={error.message} />
         )}
       >
-        <ClientConfigStore />
-        <Theme />
-        <Header
-          name={headerText}
-          chatAvailable
-          chatDisabled={chatDisabled}
-          online={videoAvailable}
-        />
-        {currentUser && (
-          <div id="chat-container">
-            <ChatContainer
-              messages={messages}
-              usernameToHighlight={currentUser.displayName}
-              chatUserId={currentUser.id}
-              isModerator={currentUser.isModerator}
-              showInput
-              height="92vh"
-              chatAvailable={isChatAvailable}
-            />
-          </div>
-        )}
+        <div className="embed-container">
+          <ClientConfigStore />
+          <Theme />
+          <Header
+            name={headerText}
+            chatAvailable
+            chatDisabled={chatDisabled}
+            online={videoAvailable}
+          />
+          {currentUser && (
+            <div id="chat-container">
+              <ChatContainer
+                messages={messages}
+                usernameToHighlight={currentUser.displayName}
+                chatUserId={currentUser.id}
+                isModerator={currentUser.isModerator}
+                showInput
+                height="100%"
+                chatAvailable={isChatAvailable}
+                inputEnabled={chatInputEnabled}
+                inputDisabledPlaceholder={chatInputDisabledMessage}
+              />
+            </div>
+          )}
+        </div>
       </ErrorBoundary>
     </div>
   );

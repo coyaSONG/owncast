@@ -2,8 +2,10 @@
 /* eslint-disable react/no-danger */
 import React, { useState, useEffect, FC } from 'react';
 import { Collapse, Typography, Skeleton } from 'antd';
-import format from 'date-fns/format';
+import { format } from 'date-fns';
 
+import { useTranslation } from 'next-export-i18n';
+import { Localization } from '../../types/localization';
 import { fetchExternalData } from '../../utils/apis';
 
 const { Panel } = Collapse;
@@ -27,6 +29,7 @@ const ArticleItem: FC<ArticleProps> = ({
   date_published: date,
   defaultOpen = false,
 }) => {
+  const { t } = useTranslation();
   const dateObject = new Date(date);
   const dateString = format(dateObject, 'MMM dd, yyyy, HH:mm');
   return (
@@ -36,7 +39,7 @@ const ArticleItem: FC<ArticleProps> = ({
           <p className="timestamp">
             {dateString} (
             <Link href={`${OWNCAST_BASE_URL}${url}`} target="_blank" rel="noopener noreferrer">
-              Link
+              {t(Localization.Admin.NewsFeed.link)}
             </Link>
             )
           </p>
@@ -48,6 +51,7 @@ const ArticleItem: FC<ArticleProps> = ({
 };
 
 export const NewsFeed = () => {
+  const { t } = useTranslation();
   const [feed, setFeed] = useState<ArticleProps[]>([]);
   const [loading, setLoading] = useState<Boolean>(true);
 
@@ -60,7 +64,7 @@ export const NewsFeed = () => {
         setFeed(result.items);
       }
     } catch (error) {
-      console.log('==== error', error);
+      console.debug('==== error', error);
     }
   };
 
@@ -69,11 +73,12 @@ export const NewsFeed = () => {
   }, []);
 
   const loadingSpinner = loading ? <Skeleton loading active /> : null;
-  const noNews = !loading && feed.length === 0 ? <div>No news.</div> : null;
+  const noNews =
+    !loading && feed.length === 0 ? <div>{t(Localization.Admin.NewsFeed.noNews)}</div> : null;
 
   return (
     <section className="news-feed form-module">
-      <Title level={2}>News &amp; Updates from Owncast</Title>
+      <Title level={2}>{t(Localization.Admin.NewsFeed.title)}</Title>
       {loadingSpinner}
       {feed.map(item => (
         <ArticleItem {...item} key={item.url} defaultOpen={feed.length === 1} />

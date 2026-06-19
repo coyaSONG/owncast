@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+.DS_Store
 
 # Test binary, built with `go test -c`
 *.test
@@ -39,10 +40,18 @@ backup/
 !core/data
 test/test.db
 test/automated/browser/screenshots
-lefthook.yml
+lefthook-local.yml
 test/automated/browser/cypress/screenshots
 test/automated/browser/cypress/videos
 web/style-definitions/build/
 
 web/public/sw.js
 web/public/workbox-*.js
+
+# Local, platform-specific dev-tool binaries installed by `make install-tools`.
+# `/bin` (root-anchored, no trailing slash) is listed alongside `bin/` so an
+# accidental `bin` *symlink* is ignored too: a trailing-slash pattern only
+# matches real directories, which is how a `bin` symlink previously slipped
+# past .gitignore and got committed, breaking the lefthook bootstrap.
+/bin
+bin/

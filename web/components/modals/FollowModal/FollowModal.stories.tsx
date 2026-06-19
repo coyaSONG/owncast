@@ -1,5 +1,4 @@
-import React from 'react';
-import { ComponentStory, ComponentMeta } from '@storybook/react';
+import { StoryFn, Meta } from '@storybook/nextjs';
 import { FollowModal } from './FollowModal';
 import FollowModalMock from '../../../stories/assets/mocks/follow-modal.png';
 
@@ -9,7 +8,7 @@ const Example = () => (
   </div>
 );
 
-export default {
+const meta = {
   title: 'owncast/Modals/Follow',
   component: FollowModal,
   parameters: {
@@ -25,14 +24,31 @@ export default {
 - Validate the input to make sure it's a valid looking account.
 - Handle errors that come back from the server.
 - Perform the redirect to the remote server when the backend response is received.
+
+## Localization Support
+This component now supports localization and all user-facing strings can be translated. To test with different languages, add '?lang=de' or '?lang=fr' to the URL to see translated versions where available.
 `,
       },
     },
   },
-} as ComponentMeta<typeof FollowModal>;
+} satisfies Meta<typeof FollowModal>;
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const Template: ComponentStory<typeof FollowModal> = () => <Example />;
+export default meta;
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const Basic = Template.bind({});
+const Template: StoryFn<typeof FollowModal> = () => <Example />;
+
+export const Basic = {
+  render: Template,
+};
+
+export const LocalizationExample = {
+  render: Template,
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'This story demonstrates the localization support. All text strings are now translatable. To test different languages, add "?lang=XX" to the URL with a supported language code like "de" for German.',
+      },
+    },
+  },
+};
