@@ -105,6 +105,23 @@ type Notification struct {
 	CreatedAt   sql.NullTime
 }
 
+type ReplayClip struct {
+	ID                string
+	StreamID          string
+	ClippedBy         sql.NullString
+	ClipTitle         sql.NullString
+	RelativeStartTime sql.NullFloat64
+	RelativeEndTime   sql.NullFloat64
+	Timestamp         sql.NullTime
+}
+
+type Stream struct {
+	ID          string
+	StreamTitle sql.NullString
+	StartTime   sql.NullTime
+	EndTime     sql.NullTime
+}
+
 type User struct {
 	ID              string
 	DisplayName     string
@@ -123,6 +140,28 @@ type UserAccessToken struct {
 	Token     string
 	UserID    string
 	Timestamp time.Time
+}
+
+type VideoSegment struct {
+	ID                    string
+	StreamID              string
+	OutputConfigurationID string
+	Path                  string
+	RelativeTimestamp     float64
+	Timestamp             sql.NullTime
+}
+
+type VideoSegmentOutputConfiguration struct {
+	ID               string
+	VariantID        string
+	Name             string
+	StreamID         string
+	SegmentDuration  int64
+	Bitrate          int64
+	Framerate        int64
+	ResolutionWidth  sql.NullInt64
+	ResolutionHeight sql.NullInt64
+	Timestamp        sql.NullTime
 }
 
 type Webhook struct {
