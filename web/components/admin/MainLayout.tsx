@@ -47,6 +47,10 @@ const ToolOutlined = dynamic(() => import('@ant-design/icons/ToolOutlined'), {
   ssr: false,
 });
 
+const CalendarOutlined = dynamic(() => import('@ant-design/icons/CalendarOutlined'), {
+  ssr: false,
+});
+
 const PlayCircleFilled = dynamic(() => import('@ant-design/icons/PlayCircleFilled'), {
   ssr: false,
 });
@@ -298,6 +302,11 @@ export const MainLayout: FC<MainLayoutProps> = ({ children }) => {
         </Link>
       ),
       icon: <StarOutlined />,
+    },
+    {
+      key: '/admin/schedule',
+      label: <Link href="/admin/schedule">Schedule</Link>,
+      icon: <CalendarOutlined />,
     },
     {
       key: 'configuration',
