@@ -54,7 +54,7 @@ func New(deps Deps) *Service {
 // which also means enabling federation at runtime starts sweeping on the
 // next tick instead of requiring a restart like the old self-gating ticker
 // did.
-func (s *Service) Run(_ context.Context) {
+func (s *Service) Run(ctx context.Context) {
 	if !s.configRepository.GetFederationEnabled() {
 		return
 	}
@@ -69,6 +69,11 @@ func (s *Service) Run(_ context.Context) {
 	markedOfflineCount := 0
 
 	for _, server := range servers {
+		// Shutdown cancels the context; stop sweeping promptly.
+		if ctx.Err() != nil {
+			return
+		}
+
 		// Only check servers that are currently marked as online
 		if !server.IsOnline {
 			continue
