@@ -41,7 +41,7 @@ jobs:
           concurrent_skipping: 'same_content_newer'
 
       - name: Check out pull request code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
@@ -55,7 +55,7 @@ jobs:
           git fetch upstream ${{ github.event.pull_request.base.ref }}
 
       - name: Check out repository code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         if: github.event_name == 'push'
 
       - name: Get changed files
@@ -76,13 +76,13 @@ jobs:
       # The plugin SDK build (owncast-plugin) and the OAuth provider
       # (node-oidc-provider) both require a recent Node; the runner default may
       # be older, so pin it.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.changed-files-yaml.outputs.src_any_changed == 'true'
         with:
           node-version: '24'
 
       - name: Cache node modules
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         env:
           cache-name: cache-node-modules-auth-tests
         with:

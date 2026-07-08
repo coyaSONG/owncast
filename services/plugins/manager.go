@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -46,17 +48,21 @@ import (
 // downloadable directly. Populated from an `assets/` directory in the
 // .ocpkg (or a <name>-assets/ sibling for loose-files plugins).
 type Loaded struct {
-	Manifest    *Manifest
-	WasmPath    string
-	PublicFS    fs.FS
-	AssetsFS    fs.FS
-	adminGlobs  []glob.Glob // compiled from manifest.admin.pages[].path
-	adminPaths  []string    // original path strings, used for "page gates descendants" prefix-matching
-	plugin      *extism.Plugin
-	mu          sync.Mutex
-	failureMu   sync.Mutex
-	filterFails int
-	disabled    atomic.Bool
+	Manifest   *Manifest
+	WasmPath   string
+	PublicFS   fs.FS
+	AssetsFS   fs.FS
+	adminGlobs []glob.Glob // compiled from manifest.admin.pages[].path
+	adminPaths []string    // original path strings, used for "page gates descendants" prefix-matching
+	plugin     *extism.Plugin
+	// releaseEngine drops this instance's reference on its shared compiled
+	// engine (nil for legacy self-contained wasm). Called exactly once by
+	// Close, after the instance itself is closed.
+	releaseEngine func()
+	mu            sync.Mutex
+	failureMu     sync.Mutex
+	filterFails   int
+	disabled      atomic.Bool
 	// pkgCloser holds the file-backed zip reader for .ocpkg plugins so the
 	// underlying file stays open for PublicFS / AssetsFS reads. nil for
 	// loose-files plugins. Closed by Loaded.Close.
@@ -125,30 +131,6 @@ const (
 	// this is looser than NotifyTimeout but still bounded.
 	HTTPHandlerTimeout = 5 * time.Second
 )
-
-// wasmCompilationCache is shared across every plugin instance so wazero
-// compiles a given wasm module to native code at most once for the lifetime
-// of the process. The cache is keyed on module content, so it dedupes the
-// repeated work of reloading the same plugin (dev churn, reload-on-change,
-// or running multiple instances of one plugin). It is safe for concurrent
-// use across runtimes.
-//
-// NOTE: this does NOT dedupe the interpreter engine across *different*
-// plugins — each plugin's wasm bundles the QuickJS/CPython engine together
-// with the author's code, so every plugin's bytes differ and hash to a
-// distinct cache key. Sharing the engine across distinct plugins requires
-// splitting it out of the per-plugin module; tracked separately.
-var (
-	wasmCompilationCache     wazero.CompilationCache
-	wasmCompilationCacheOnce sync.Once
-)
-
-func sharedCompilationCache() wazero.CompilationCache {
-	wasmCompilationCacheOnce.Do(func() {
-		wasmCompilationCache = wazero.NewCompilationCache()
-	})
-	return wasmCompilationCache
-}
 
 // IsDisabled reports whether the plugin has been auto-disabled by the
 // strike system. Disabled plugins are omitted from Manager.Snapshot, so they
@@ -291,12 +273,18 @@ func (l *Loaded) Close(ctx context.Context) {
 	l.mu.Lock()
 	pl := l.plugin
 	l.plugin = nil
+	release := l.releaseEngine
+	l.releaseEngine = nil
 	l.mu.Unlock()
 	if pl != nil {
-		// Closes this instance only. For shared-engine plugins the underlying
-		// CompiledPlugin (the engine) is process-global and is never closed
-		// here; for legacy wasm plugins this closes their own runtime.
+		// Closes this instance only; the shared compiled engine is
+		// reference-counted and torn down by releaseEngine below when this
+		// was the last plugin of its language. Legacy wasm plugins close
+		// their own runtime here.
 		_ = pl.Close(ctx)
+	}
+	if release != nil {
+		release()
 	}
 	// Drop the call-time identity so any in-flight or stale host call from this
 	// plugin resolves to "not found" and fails cleanly rather than acting on a
@@ -369,15 +357,21 @@ func (m *Manager) notifyUnload(l *Loaded) {
 // identity for plugins that post to chat. Empty means "use
 // DisplayName" (resolved at chat-send time, not here).
 type DiscoveredEntry struct {
-	Slug           string   `json:"slug"`
-	DisplayName    string   `json:"name"`
-	BotDisplayName string   `json:"botDisplayName,omitempty"`
-	Version        string   `json:"version,omitempty"`
-	Description    string   `json:"description,omitempty"`
-	Permissions    []string `json:"permissions,omitempty"`
-	Path           string   `json:"path"`
-	Enabled        bool     `json:"enabled"`
-	Loaded         bool     `json:"loaded"`
+	Slug           string `json:"slug"`
+	DisplayName    string `json:"name"`
+	BotDisplayName string `json:"botDisplayName,omitempty"`
+	Version        string `json:"version,omitempty"`
+	Description    string `json:"description,omitempty"`
+	// Homepage is an optional external link for the plugin (docs, help
+	// page, source repo, tip jar). Recorded from the registry's
+	// metadata when the plugin is installed from the registry (kept in
+	// a "<base>.registry.json" sidecar next to the plugin file);
+	// manually-uploaded plugins have none.
+	Homepage    string   `json:"homepage,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+	Path        string   `json:"path"`
+	Enabled     bool     `json:"enabled"`
+	Loaded      bool     `json:"loaded"`
 	// AutoDisabled is set when the dispatcher's strike system stopped
 	// invoking the plugin (too many consecutive filter failures).
 	// Enabled stays true so the admin can see what they originally chose,
@@ -621,7 +615,12 @@ func (m *Manager) Snapshot() []*Loaded {
 // Enable marks a discovered plugin as enabled, captures the current
 // manifest's permission set as the approved baseline (so any later
 // expansion triggers a re-approval flow), persists the choice, and
-// loads the plugin. No-op if already loaded.
+// loads the plugin. No-op if already loaded with nothing pending.
+//
+// Calling Enable on an already-enabled, already-loaded plugin that has
+// pending permissions is the re-approval action: the admin consents to the
+// expanded set, so the baseline is re-captured and the running (old-version)
+// instance is swapped for one built from the current package.
 func (m *Manager) Enable(ctx context.Context, name string) error {
 	m.mu.Lock()
 	d, ok := m.discovered[name]
@@ -630,8 +629,10 @@ func (m *Manager) Enable(ctx context.Context, name string) error {
 		return fmt.Errorf("plugin %q not discovered", name)
 	}
 	if m.enabledSet[name] {
-		// Already enabled in the persisted set; just make sure it's loaded.
-		if _, ok := m.loaded[name]; ok {
+		// Already enabled and running with nothing awaiting approval:
+		// nothing to do. With pending permissions, fall through — this
+		// call is the admin approving them.
+		if _, ok := m.loaded[name]; ok && len(pendingPermissions(d.Permissions, m.approvedSet[name])) == 0 {
 			m.mu.Unlock()
 			return nil
 		}
@@ -658,8 +659,18 @@ func (m *Manager) Enable(ctx context.Context, name string) error {
 	if err := m.saveEnabledSet(); err != nil {
 		return fmt.Errorf("persist enabled set: %w", err)
 	}
-	err := m.loadInternal(ctx, name)
-	return err
+	// Swap out any still-running instance (re-approval of an updated plugin)
+	// before loading, so the old instance and its engine reference are
+	// released rather than silently overwritten in m.loaded.
+	m.mu.Lock()
+	old := m.loaded[name]
+	delete(m.loaded, name)
+	m.mu.Unlock()
+	if old != nil {
+		m.notifyUnload(old)
+		old.Close(ctx)
+	}
+	return m.loadInternal(ctx, name)
 }
 
 // validateUploadedPackage checks an uploaded .ocpkg's bytes, verifies the
@@ -808,8 +819,17 @@ const MaxUploadBytes = 50 * 1024 * 1024
 // filename is derived from the manifest's name, not from the uploaded
 // name, so an admin can't drop a file outside the plugins directory by
 // abusing the upload filename, and a plugin update from a differently
-// named .ocpkg ends up replacing the right file. Returns the discovered
-// entry for the installed plugin.
+// named .ocpkg ends up replacing the right file.
+//
+// When the plugin is already enabled and the new manifest declares no
+// permissions beyond the approved set, the running instance is reloaded in
+// place so the update takes effect immediately. If the update expands
+// permissions, the old instance keeps running (it holds only approved
+// permissions) and the entry reports PendingPermissions so the admin UI can
+// run the re-approval flow.
+//
+// Returns the discovered entry for the installed plugin, with Enabled and
+// Loaded populated the same way List() reports them.
 func (m *Manager) Install(ctx context.Context, packageBytes []byte) (*DiscoveredEntry, error) {
 	manifest, err := validateUploadedPackage(ctx, m.env, packageBytes)
 	if err != nil {
@@ -827,15 +847,83 @@ func (m *Manager) Install(ctx context.Context, packageBytes []byte) (*Discovered
 
 	m.mu.RLock()
 	entry, ok := m.discovered[manifest.Slug]
-	var snapshot DiscoveredEntry
+	enabled := m.enabledSet[manifest.Slug]
+	_, isLoaded := m.loaded[manifest.Slug]
+	pending := 0
 	if ok {
-		snapshot = *entry
+		pending = len(entry.PendingPermissions)
 	}
 	m.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("scan did not pick up the installed plugin %q", manifest.Slug)
 	}
+
+	// An update of an enabled plugin whose permissions are still covered by
+	// the admin's approval takes effect now: swap the running instance for
+	// one built from the new package. A failure surfaces via LastError (set
+	// by loadInternal) rather than failing the install — the file on disk is
+	// already the new version either way.
+	if enabled && isLoaded && pending == 0 {
+		if err := m.Reload(ctx, manifest.Slug); err != nil {
+			fmt.Fprintf(os.Stderr, "plugin %s: reload after update failed: %v\n", manifest.Slug, err)
+		}
+	}
+
+	m.mu.RLock()
+	var snapshot DiscoveredEntry
+	if entry, ok := m.discovered[manifest.Slug]; ok {
+		snapshot = *entry
+		snapshot.Enabled = m.enabledSet[manifest.Slug]
+		_, snapshot.Loaded = m.loaded[manifest.Slug]
+	}
+	m.mu.RUnlock()
 	return &snapshot, nil
+}
+
+// SetPluginHomepage records an external link for an installed plugin,
+// persisted as a "<base>.registry.json" sidecar next to the plugin file
+// so it survives restarts, and mirrored into the discovered entry so
+// the next List() shows it without waiting for a scan. Called by the
+// registry install flow with the registry's listing metadata. Only
+// absolute http(s) URLs are accepted since the admin UI renders the
+// value as a clickable link; an empty URL removes the sidecar.
+func (m *Manager) SetPluginHomepage(slug, homepage string) error {
+	m.mu.RLock()
+	entry, ok := m.discovered[slug]
+	var path string
+	if ok {
+		path = entry.Path
+	}
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("plugin %q not discovered", slug)
+	}
+
+	metaPath := registryMetaPathFor(path)
+	if homepage == "" {
+		if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	} else {
+		u, err := url.Parse(homepage)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("homepage %q must be an absolute http(s) URL", homepage)
+		}
+		b, err := json.Marshal(registryMeta{Homepage: homepage})
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(metaPath, b, 0o600); err != nil {
+			return fmt.Errorf("write registry metadata: %w", err)
+		}
+	}
+
+	m.mu.Lock()
+	if entry, ok := m.discovered[slug]; ok {
+		entry.Homepage = homepage
+	}
+	m.mu.Unlock()
+	return nil
 }
 
 // Disable unloads a plugin and persists the choice. No-op if already disabled.
@@ -857,6 +945,10 @@ func (m *Manager) Disable(ctx context.Context, name string) error {
 		m.notifyUnload(loaded)
 		loaded.Close(ctx)
 	}
+	// Hand freed pages back to the OS promptly so an operator watching
+	// process memory sees the disable take effect (the Go scavenger would
+	// get there, but only after minutes).
+	debug.FreeOSMemory()
 	return nil
 }
 
@@ -884,6 +976,7 @@ func (m *Manager) Uninstall(ctx context.Context, name string) error {
 	if loaded != nil {
 		m.notifyUnload(loaded)
 		loaded.Close(ctx)
+		debug.FreeOSMemory()
 	}
 
 	// Persist the cleared enabled + approved state before touching the
@@ -912,6 +1005,7 @@ func removePluginFiles(path string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	_ = os.Remove(registryMetaPathFor(path))
 	if strings.HasSuffix(path, ".wasm") {
 		base := strings.TrimSuffix(path, ".wasm")
 		_ = os.Remove(base + ".manifest.json")
@@ -1065,6 +1159,7 @@ func (m *Manager) scan(ctx context.Context) error {
 
 		hasIcon := hasPluginIcon(path)
 		hasInstructions := hasPluginInstructions(path)
+		homepage := readPluginHomepage(path)
 
 		m.mu.Lock()
 		if existing, ok := m.discovered[manifest.Slug]; ok {
@@ -1081,6 +1176,7 @@ func (m *Manager) scan(ctx context.Context) error {
 			existing.PendingPermissions = pendingPermissions(manifest.Permissions, m.approvedSet[manifest.Slug])
 			existing.AllowedHosts = manifest.Network.AllowedHosts
 			existing.Config = manifest.Config
+			existing.Homepage = homepage
 		} else {
 			m.discovered[manifest.Slug] = &DiscoveredEntry{
 				Slug:               manifest.Slug,
@@ -1097,6 +1193,7 @@ func (m *Manager) scan(ctx context.Context) error {
 				HasInstructions:    hasInstructions,
 				PendingPermissions: pendingPermissions(manifest.Permissions, m.approvedSet[manifest.Slug]),
 				Config:             manifest.Config,
+				Homepage:           homepage,
 			}
 		}
 		m.mu.Unlock()
@@ -1387,9 +1484,19 @@ func loadFromBytes(ctx context.Context, env *HostEnv, manifestBytes, artifactByt
 	}
 	manifest.Type = runtimeType
 
-	p, err := instantiate(ctx, env, manifest, manifestBytes, artifactBytes, displayName)
+	p, releaseEngine, err := instantiate(ctx, env, manifest, manifestBytes, artifactBytes, displayName)
 	if err != nil {
 		return nil, err
+	}
+
+	// fail tears down the just-created instance (and its engine reference) on
+	// any load-path error below.
+	fail := func(err error) error {
+		_ = p.Close(ctx)
+		if releaseEngine != nil {
+			releaseEngine()
+		}
+		return err
 	}
 
 	// Register the plugin's identity so shared host functions can resolve it at
@@ -1410,30 +1517,24 @@ func loadFromBytes(ctx context.Context, env *HostEnv, manifestBytes, artifactByt
 	})
 
 	if !p.FunctionExists("register") {
-		_ = p.Close(ctx)
-		return nil, fmt.Errorf("plugin does not export register()")
+		return nil, fail(fmt.Errorf("plugin does not export register()"))
 	}
 	_, regOut, err := p.Call("register", nil)
 	if err != nil {
-		_ = p.Close(ctx)
-		return nil, fmt.Errorf("call register(): %w", err)
+		return nil, fail(fmt.Errorf("call register(): %w", err))
 	}
 	if len(regOut) > MaxRegisterOutputBytes {
-		_ = p.Close(ctx)
-		return nil, fmt.Errorf("register() output too large: %d bytes (max %d)", len(regOut), MaxRegisterOutputBytes)
+		return nil, fail(fmt.Errorf("register() output too large: %d bytes (max %d)", len(regOut), MaxRegisterOutputBytes))
 	}
 	var runtime Manifest
 	if err := json.Unmarshal(regOut, &runtime); err != nil {
-		_ = p.Close(ctx)
-		return nil, fmt.Errorf("parse register() output: %w", err)
+		return nil, fail(fmt.Errorf("parse register() output: %w", err))
 	}
 	if err := manifest.AgreesWith(&runtime); err != nil {
-		_ = p.Close(ctx)
-		return nil, fmt.Errorf("manifest/runtime mismatch: %w", err)
+		return nil, fail(fmt.Errorf("manifest/runtime mismatch: %w", err))
 	}
 	if err := requireChatFilterPermission(manifest, runtime.Subscriptions); err != nil {
-		_ = p.Close(ctx)
-		return nil, err
+		return nil, fail(err)
 	}
 	manifest.Subscriptions = runtime.Subscriptions
 	// Command metadata is derived by the SDK and reported via register() (like
@@ -1449,15 +1550,14 @@ func loadFromBytes(ctx context.Context, env *HostEnv, manifestBytes, artifactByt
 		lowered := strings.ToLower(page.Path)
 		g, err := glob.Compile(lowered)
 		if err != nil {
-			_ = p.Close(ctx)
-			return nil, fmt.Errorf("manifest.admin.pages: invalid path glob %q: %w", page.Path, err)
+			return nil, fail(fmt.Errorf("manifest.admin.pages: invalid path glob %q: %w", page.Path, err))
 		}
 		adminGlobs = append(adminGlobs, g)
 		adminPaths = append(adminPaths, lowered)
 	}
 
 	loaded = true
-	return &Loaded{Manifest: manifest, plugin: p, adminGlobs: adminGlobs, adminPaths: adminPaths, AssetsFS: assetsFS}, nil
+	return &Loaded{Manifest: manifest, plugin: p, releaseEngine: releaseEngine, adminGlobs: adminGlobs, adminPaths: adminPaths, AssetsFS: assetsFS}, nil
 }
 
 // instantiate creates the extism plugin instance for a manifest: a per-plugin
@@ -1465,20 +1565,26 @@ func loadFromBytes(ctx context.Context, env *HostEnv, manifestBytes, artifactByt
 // for "wasm"/legacy. Either way the result is a *extism.Plugin with its
 // identity slug stashed in Config so shared host functions can resolve the
 // caller, and its per-plugin network scope applied.
-func instantiate(ctx context.Context, env *HostEnv, manifest *Manifest, manifestBytes, artifactBytes []byte, displayName string) (*extism.Plugin, error) {
+//
+// For shared-engine plugins the returned release func drops the instance's
+// reference on the compiled engine; the caller must invoke it exactly once
+// after closing the instance. nil for legacy self-contained wasm, whose
+// instance close tears down its whole runtime.
+func instantiate(ctx context.Context, env *HostEnv, manifest *Manifest, manifestBytes, artifactBytes []byte, displayName string) (*extism.Plugin, func(), error) {
 	// Give the guest the real host wall and monotonic clocks (wazero's default
 	// is a frozen 2022 clock). Nanosleep is deliberately NOT wired so a plugin
 	// can't block inside a call and burn its timeout budget.
 	moduleConfig := wazero.NewModuleConfig().WithSysWalltime().WithSysNanotime()
 
 	if manifest.usesSharedEngine() {
-		engine, err := compiledEngines.get(ctx, env, manifest.Type)
+		engine, release, err := compiledEngines.acquire(ctx, env, manifest.Type)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		inst, err := engine.Instance(ctx, extism.PluginInstanceConfig{ModuleConfig: moduleConfig})
 		if err != nil {
-			return nil, fmt.Errorf("instantiate %s engine: %w", manifest.Type, err)
+			release()
+			return nil, nil, fmt.Errorf("instantiate %s engine: %w", manifest.Type, err)
 		}
 		// Inject the per-plugin script + manifest the engine bootstrap reads at
 		// runtime, plus the slug shared host functions resolve identity by.
@@ -1488,12 +1594,14 @@ func instantiate(ctx context.Context, env *HostEnv, manifest *Manifest, manifest
 			configKeyManifest: string(manifestBytes),
 		}
 		applyNetworkScope(inst, manifest)
-		return inst, nil
+		return inst, release, nil
 	}
 
-	// Legacy self-contained wasm: each plugin compiles into its own runtime.
-	// Share the compilation cache so reloads / repeated loads of the same
-	// module don't recompile its embedded engine.
+	// Legacy self-contained wasm: each plugin compiles into its own runtime,
+	// deliberately without a shared compilation cache — a cache entry would
+	// pin the compiled native code for the life of the process, so disabling
+	// the plugin would never return its memory. Reloads recompile (fast
+	// relative to an explicit admin action).
 	extismManifest := extism.Manifest{
 		Wasm:    []extism.Wasm{extism.WasmData{Data: artifactBytes, Name: displayName}},
 		Timeout: 10_000, // milliseconds; enables Wazero's WithCloseOnContextDone
@@ -1512,16 +1620,19 @@ func instantiate(ctx context.Context, env *HostEnv, manifest *Manifest, manifest
 	pc := extism.PluginConfig{
 		EnableWasi:    true,
 		ModuleConfig:  moduleConfig,
-		RuntimeConfig: wazero.NewRuntimeConfig().WithCompilationCache(sharedCompilationCache()),
+		RuntimeConfig: wazero.NewRuntimeConfig(),
 	}
 	p, err := extism.NewPlugin(ctx, extismManifest, pc, BuildHostFunctions(env))
 	if err != nil {
-		return nil, fmt.Errorf("instantiate wasm: %w", err)
+		return nil, nil, fmt.Errorf("instantiate wasm: %w", err)
 	}
 	// Even self-contained plugins now use the shared, identity-resolving host
 	// functions, so stash the slug for the registry lookup.
 	p.Config = map[string]string{configKeySlug: manifest.Slug}
-	return p, nil
+	// Return the compiler's transient scratch space now rather than letting
+	// the Go runtime sit on it (same reasoning as compileEngine).
+	debug.FreeOSMemory()
+	return p, nil, nil
 }
 
 // applyNetworkScope sets a shared-engine instance's per-plugin AllowedHosts.
@@ -1573,6 +1684,40 @@ func requireChatFilterPermission(manifest *Manifest, subs Subscriptions) error {
 		}
 	}
 	return nil
+}
+
+// registryMetaSuffix names the sidecar file the host writes next to a
+// plugin installed from the registry ("<base>.registry.json"), carrying
+// registry-sourced metadata that has no home in the plugin's own
+// manifest. The scan loop ignores it (only .wasm/.ocpkg are discovered)
+// and Uninstall removes it with the plugin.
+const registryMetaSuffix = ".registry.json"
+
+// registryMeta is the sidecar's JSON shape.
+type registryMeta struct {
+	Homepage string `json:"homepage,omitempty"`
+}
+
+// registryMetaPathFor returns the registry-metadata sidecar path for a
+// plugin file: "<dir>/<base>.registry.json" for both the x.ocpkg and
+// x.wasm layouts.
+func registryMetaPathFor(pluginPath string) string {
+	return strings.TrimSuffix(pluginPath, filepath.Ext(pluginPath)) + registryMetaSuffix
+}
+
+// readPluginHomepage reads the homepage from a plugin's registry
+// sidecar, or "" when there is no sidecar (manual upload) or it doesn't
+// parse. Called per scan, so it's a single small read.
+func readPluginHomepage(pluginPath string) string {
+	b, err := os.ReadFile(registryMetaPathFor(pluginPath))
+	if err != nil {
+		return ""
+	}
+	var meta registryMeta
+	if err := json.Unmarshal(b, &meta); err != nil {
+		return ""
+	}
+	return meta.Homepage
 }
 
 // PluginIconFilename is the conventional filename a plugin uses to ship
